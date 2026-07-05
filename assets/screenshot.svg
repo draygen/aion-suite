@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="404" viewBox="0 0 860 404" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">
+  <rect x="0.5" y="0.5" width="859" height="403" rx="10" fill="#0d1117" stroke="#30363d"/>
+  <rect x="0.5" y="0.5" width="859" height="40" rx="10" fill="#161b22"/>
+  <rect x="0.5" y="30" width="859" height="11" fill="#161b22"/>
+  <line x1="0.5" y1="40.5" x2="859.5" y2="40.5" stroke="#30363d"/>
+  <circle cx="24" cy="20" r="6" fill="#ff5f56"/>
+  <circle cx="44" cy="20" r="6" fill="#ffbd2e"/>
+  <circle cx="64" cy="20" r="6" fill="#27c93f"/>
+  <text x="430" y="25" text-anchor="middle" fill="#8b949e" font-size="12.5">aion-suite — ./status.sh &amp;&amp; ./tests/run.sh</text>
+
+  <g xml:space="preserve">
+    <text x="24" y="72"><tspan fill="#7ee787">$ </tspan><tspan fill="#c9d1d9">./status.sh</tspan></text>
+    <text x="24" y="94" fill="#79c0ff">== aion-suite status ==</text>
+    <text x="24" y="116" fill="#c9d1d9">  ollama       <tspan fill="#3fb950">✓</tspan> up @127.0.0.1:11434 <tspan fill="#8b949e">(aion-producer:latest present)</tspan></text>
+    <text x="24" y="138" fill="#c9d1d9">  postgres     <tspan fill="#3fb950">✓</tspan> up @127.0.0.1:5432 <tspan fill="#8b949e">(aion_db)</tspan></text>
+    <text x="24" y="160" fill="#c9d1d9">  aion-core    <tspan fill="#3fb950">✓</tspan> healthy @127.0.0.1:5000 <tspan fill="#8b949e">(pid 177925)</tspan></text>
+    <text x="24" y="182" fill="#c9d1d9">  mcpbuilder   <tspan fill="#3fb950">✓</tspan> built <tspan fill="#8b949e">(stdio, on-demand)</tspan></text>
+
+    <text x="24" y="226"><tspan fill="#7ee787">$ </tspan><tspan fill="#c9d1d9">./tests/run.sh</tspan></text>
+    <text x="24" y="248" fill="#79c0ff">== CONTRACT (mcpbuilder → AION endpoints) ==</text>
+    <text x="24" y="270" fill="#c9d1d9">  <tspan fill="#3fb950">[PASS]</tspan> health · service-chat · channels · activity · memory · admin</text>
+    <text x="24" y="292" fill="#79c0ff">== INTELLIGENCE (aion-producer via service/chat) ==</text>
+    <text x="24" y="314" fill="#c9d1d9">  <tspan fill="#3fb950">[PASS]</tspan> factual · reasoning · instruction-follow · JSON · memory recall</text>
+    <text x="24" y="336" fill="#79c0ff">== SUMMARY ==</text>
+    <text x="24" y="358" fill="#c9d1d9">  total 16 | <tspan fill="#3fb950">passed 16</tspan> | critical failed 0 | informational failed 0</text>
+    <text x="24" y="380" fill="#8b949e">  intel latency: avg 1052ms, max 1603ms</text>
+  </g>
+</svg>

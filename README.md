@@ -1,6 +1,14 @@
 # aion-suite
 
+![status](https://img.shields.io/badge/status-working-3fb950)
+![tests](https://img.shields.io/badge/tests-16%2F16%20passing-3fb950)
+![python](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)
+![Flask](https://img.shields.io/badge/Flask-API-000000?logo=flask&logoColor=white)
+![MCP](https://img.shields.io/badge/MCP-aion--mcp-8957e5)
+
 Clean, self-contained home for the **AION integration used by the `mcpbuilder` MCP server** — extracted from the sprawling drayhub trees so it can be run with one start/stop.
+
+![aion-suite status and test run](assets/screenshot.svg)
 
 ## The chain
 
