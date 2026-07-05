@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 import time
+import secrets
 import logging
 
 import httpx
@@ -32,13 +33,17 @@ _MACHINES = ("wsl", "draydev", "ec2")
 _AGENTS = ("claude", "codex", "agy")
 _PENDING_TTL_SEC = 120
 
-# client_ip -> {"action", "params", "desc", "at"}
+# Pending confirmations are keyed by the *authenticated username* (not client IP,
+# which collides for users behind the same NAT/VPN) and gated by a one-time token
+# shown at staging — so only the person who staged an action can confirm that exact
+# action. (Hardening recommended by a fleet_review of this very hook.)
+# username -> {"action", "params", "desc", "at", "token"}
 _pending: dict[str, dict] = {}
 
 # command patterns
 _RE_STATUS = re.compile(r"^fleet\s+(status|health)\s*$", re.I)
 _RE_HELP = re.compile(r"^fleet(\s+help)?\s*$", re.I)
-_RE_YES = re.compile(r"^fleet\s+(yes|confirm)\s*$", re.I)
+_RE_YES = re.compile(r"^fleet\s+(yes|confirm)(?:\s+([A-Za-z0-9]+))?\s*$", re.I)
 _RE_NO = re.compile(r"^fleet\s+(cancel|no)\s*$", re.I)
 _RE_RUN_A = re.compile(r"^fleet\s+run\s+(\w+)\s+(\w+)\s*:\s*(.+)$", re.I | re.S)          # run <machine> <agent>: task
 _RE_RUN_B = re.compile(r"^fleet\s+run\s+(\w+)\s+on\s+(\w+)\s*:\s*(.+)$", re.I | re.S)     # run <agent> on <machine>: task
@@ -60,7 +65,7 @@ def _help() -> str:
         "- `fleet status` — machine & agent health\n"
         "- `fleet run <machine> <agent>: <task>` — e.g. `fleet run draydev codex: check disk usage`\n"
         "- `fleet review: <task>` — fan the task to codex + agy\n"
-        "- `fleet yes` / `fleet cancel` — confirm or discard a staged run\n"
+        "- `fleet yes <token>` / `fleet cancel` — confirm (with the staged token) or discard\n"
         f"Machines: {', '.join(_MACHINES)} · Agents: {', '.join(_AGENTS)}"
     )
 
@@ -92,11 +97,12 @@ def _format_status() -> str:
     return "\n".join(lines)
 
 
-def _stage(client_ip: str, action: str, params: dict, desc: str) -> str:
-    _pending[client_ip] = {"action": action, "params": params, "desc": desc, "at": time.time()}
+def _stage(username: str, action: str, params: dict, desc: str) -> str:
+    token = secrets.token_hex(3)  # 6-char one-time confirmation code
+    _pending[username] = {"action": action, "params": params, "desc": desc, "at": time.time(), "token": token}
     return (
         f"⚠ **Confirm:** {desc}\n"
-        f"Reply `fleet yes` within {_PENDING_TTL_SEC // 60} min to execute, or `fleet cancel`."
+        f"Reply `fleet yes {token}` within {_PENDING_TTL_SEC // 60} min to execute, or `fleet cancel`."
     )
 
 
@@ -116,24 +122,36 @@ def _execute(action: str, params: dict) -> str:
     return data.get("output", "(no output)")
 
 
-def handle_fleet_command(message: str, client_ip: str) -> str | None:
-    """Return a reply string if `message` is a fleet command, else None."""
+def handle_fleet_command(message: str, username: str, client_ip: str | None = None) -> str | None:
+    """Return a reply string if `message` is a fleet command, else None.
+
+    `username` is the authenticated identity the pending confirmation is bound to;
+    `client_ip` is accepted for logging only and is intentionally NOT used as the key.
+    """
     text = (message or "").strip()
     if not text.lower().startswith("fleet"):
         return None
     if not CONFIG.get("fleet_control_enabled", True):
         return None
 
-    # confirm / cancel a staged action
-    if _RE_YES.match(text):
-        pend = _pending.pop(client_ip, None)
+    # confirm / cancel a staged action (keyed by authenticated user + one-time token)
+    m_yes = _RE_YES.match(text)
+    if m_yes:
+        supplied_token = (m_yes.group(2) or "").lower()
+        pend = _pending.get(username)
         if not pend:
             return "Nothing staged to confirm. Start with `fleet run …` or `fleet review: …`."
         if time.time() - pend["at"] > _PENDING_TTL_SEC:
+            _pending.pop(username, None)
             return "That staged action expired. Re-issue the `fleet run`/`fleet review` command."
+        if not supplied_token:
+            return f"Include the confirmation token: `fleet yes {pend['token']}`."
+        if not secrets.compare_digest(supplied_token, pend["token"]):
+            return "That token doesn't match the staged action. Check the code from the confirmation message."
+        _pending.pop(username, None)  # consume — one-time use
         return f"Executing — {pend['desc']}\n\n{_execute(pend['action'], pend['params'])}"
     if _RE_NO.match(text):
-        return "Cancelled." if _pending.pop(client_ip, None) else "Nothing staged."
+        return "Cancelled." if _pending.pop(username, None) else "Nothing staged."
 
     if _RE_STATUS.match(text):
         return _format_status()
@@ -151,13 +169,13 @@ def handle_fleet_command(message: str, client_ip: str) -> str | None:
         if agent not in _AGENTS:
             return f"Unknown agent `{agent}`. Choose one of: {', '.join(_AGENTS)}."
         desc = f"run **{agent}** on **{machine}**:\n> {task}"
-        return _stage(client_ip, "run", {"machine": machine, "agent": agent, "prompt": task}, desc)
+        return _stage(username, "run", {"machine": machine, "agent": agent, "prompt": task}, desc)
 
     m = _RE_REVIEW.match(text)
     if m:
         task = m.group(1).strip()
         desc = f"review across **codex + agy**:\n> {task}"
-        return _stage(client_ip, "review", {"prompt": task}, desc)
+        return _stage(username, "review", {"prompt": task}, desc)
 
     if _RE_HELP.match(text):
         return _help()

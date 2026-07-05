@@ -53,13 +53,16 @@ and needs an explicit `fleet yes`:
 fleet status                          machine & agent health
 fleet run <machine> <agent>: <task>   e.g. fleet run draydev codex: check disk usage
 fleet review: <task>                  fan the task to codex + agy
-fleet yes | fleet cancel              confirm / discard a staged run
+fleet yes <token> | fleet cancel      confirm (with the staged token) or discard
 ```
 
-Guardrails: staged confirmation, localhost-only gateway, an on/off flag
-(`fleet_control_enabled`), and an optional shared token (`FLEET_GATEWAY_TOKEN`) required on
-gateway writes. Text that merely starts with "fleet" but isn't a command falls through to
-normal chat.
+Guardrails: staging returns a one-time token bound to that exact action, and the
+confirmation is keyed to the **authenticated username** (not client IP, which collides
+behind NAT/VPN) — so only the person who staged an action can confirm it, once. Plus a
+localhost-only gateway, an on/off flag (`fleet_control_enabled`), and an optional shared
+token (`FLEET_GATEWAY_TOKEN`) on gateway writes. Text that merely starts with "fleet" but
+isn't a command falls through to normal chat. (This confirmation design was hardened after a
+`fleet review` of the hook itself flagged the original IP-keyed version.)
 
 ### LLM tuning
 

@@ -1468,7 +1468,7 @@ def chat():
         if "response" not in locals() and _is_system_prompt_query(user_message):
             response = _system_prompt_summary(username)
             sanitize_response = False
-        elif "response" not in locals() and (fleet_reply := handle_fleet_command(user_message, client_ip)) is not None:
+        elif "response" not in locals() and (fleet_reply := handle_fleet_command(user_message, username, client_ip)) is not None:
             # Fleet control hook: `fleet …` commands drive mcpbuilder via the
             # gateway (status is immediate; run/review require `fleet yes`).
             log_event(
