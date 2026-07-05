@@ -8,6 +8,11 @@
 
 Clean, self-contained home for the **AION integration used by the `mcpbuilder` MCP server** — extracted from the sprawling drayhub trees so it can be run with one start/stop.
 
+> 🪞 **Highlight:** the suite's own multi-agent `fleet review` (two independent models in
+> parallel) caught a real security flaw in *this project's* fleet control hook — an IP-keyed
+> confirmation gate vulnerable to NAT hijacking — and both models independently agreed on the
+> fix. It's now hardened (username + one-time token). → [HIGHLIGHTS.md](HIGHLIGHTS.md)
+
 ![aion-suite status and test run](assets/screenshot.svg)
 
 ## The chain
