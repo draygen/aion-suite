@@ -42,11 +42,13 @@ from llm import ask_llm_chat
 from profile_builder import get_profile_summary, build_profile_summary, invalidate_cache as invalidate_profile_cache
 from tools import available_tool_status, dispatch_tool_message, handle_ops_command
 from kali_routes import kali_bp
+from fleet_topology import fleet_bp
 
 app = Flask(__name__)
 logger = get_logger("web")
 CORS(app, origins=CONFIG.get("cors_origins"), supports_credentials=True)
 app.register_blueprint(kali_bp)
+app.register_blueprint(fleet_bp)
 
 _GLOBAL_CHAT_CHANNEL = GLOBAL_CHANNEL
 _GLOBAL_CHAT_THREAD_ID = "lobby"

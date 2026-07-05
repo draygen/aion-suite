@@ -6,12 +6,21 @@ set -uo pipefail
 
 SUITE="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$SUITE/pids/aion-core.pid"
+GW_PID_FILE="$SUITE/pids/fleet-gateway.pid"
 PG_CONTAINER="mft-server-db-1"
 STOP_DEPS="no"; [ "${1:-}" = "--deps" ] && STOP_DEPS="yes"
 
 ok(){ echo "  [+] $*"; }; warn(){ echo "  [!] $*"; }
 
 echo "== aion-suite stop =="
+
+# fleet-gateway (read-only status HTTP backing the /fleet page)
+if [ -f "$GW_PID_FILE" ]; then
+  GPID="$(cat "$GW_PID_FILE" 2>/dev/null || true)"
+  if [ -n "$GPID" ] && kill -0 "$GPID" 2>/dev/null; then kill "$GPID" 2>/dev/null && ok "fleet-gateway stopped"; fi
+  rm -f "$GW_PID_FILE"
+fi
+pkill -f "dist/fleet-gateway.js" 2>/dev/null || true
 
 # aion-core: prefer pidfile, then fall back to matching the web.py process in this project
 stopped="no"

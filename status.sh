@@ -26,3 +26,8 @@ else line "aion-core" "$down down"; fi
 
 # mcpbuilder
 if [ -f "$MCPBUILDER/dist/index.js" ]; then line "mcpbuilder" "$up built (stdio, on-demand)"; else line "mcpbuilder" "$down dist/ not built"; fi
+
+# fleet-gateway (read-only status HTTP that backs the /fleet topology page)
+if curl -sf --max-time 4 http://127.0.0.1:5100/health >/dev/null 2>&1; then
+  line "fleet-gw" "$up up @127.0.0.1:5100 (topology: :5000/fleet)"
+else line "fleet-gw" "$down down (npm run gateway in mcpbuilder — /fleet shows machines as unknown)"; fi

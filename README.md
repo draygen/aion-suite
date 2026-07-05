@@ -25,12 +25,30 @@ mcpbuilder (aion-mcp, stdio)  ──calls──▶  aion-core (Flask :5000)
 - **Ollama** & **Postgres** are shared external dependencies — *ensured*, not owned. Ollama runs on the Windows host (GPU); Postgres reuses the existing `mft-server-db-1` container so `aion_db` data is preserved.
 - **mcpbuilder** stays at `/mnt/c/projects/mcpbuilder` (its own project). It's stdio, spawned on demand by Claude Desktop / codex — nothing to daemonize. Its aion tools hit `aion-core` at `127.0.0.1:5000`.
 
+## Fleet topology page
+
+AION's chat UI now includes a **Fleet** view (`http://127.0.0.1:5000/fleet`, linked from the
+chat header) that draws every machine and service in the stack, the connections between them,
+and live per-node health. Click any node for details; machines expand to per-agent
+(claude / codex / agy) status. It auto-refreshes every 12s.
+
+![Aion Fleet topology](assets/fleet-topology.svg)
+
+Machine/agent health comes from a small **read-only fleet gateway** — a localhost HTTP face
+(`:5100`) over mcpbuilder's `fleet_status` probe, since mcpbuilder itself is stdio-only. The
+gateway exposes health only (never remote execution) and is started/stopped with the suite. If
+it's down, the page degrades gracefully and shows machines as *unknown*. Data sources:
+
+- **infra** (Ollama, Postgres, aion-core) — direct HTTP/TCP probes from `aion-core`
+- **fleet machines + agents** (wsl / draydev / ec2) — the fleet gateway
+- **Kali container** — the existing `/api/kali` sensor health
+
 ## Usage
 
 ```bash
-./start.sh      # ensure Ollama+Postgres, start aion-core, verify mcpbuilder, then print status
-./status.sh     # health line per component
-./stop.sh       # stop aion-core (leaves Ollama+Postgres up)
+./start.sh      # ensure Ollama+Postgres, start aion-core + fleet-gateway, verify mcpbuilder, print status
+./status.sh     # health line per component (incl. fleet-gw)
+./stop.sh       # stop aion-core + fleet-gateway (leaves Ollama+Postgres up)
 ./stop.sh --deps  # also stop the Postgres container (Ollama untouched)
 ```
 

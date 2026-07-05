@@ -77,6 +77,9 @@ CONFIG = {
     "USER_TIMEZONE": "America/New_York",
     "memory_enabled": True,
     "goals_enabled": True,
+    # Read-only fleet gateway (mcpbuilder `npm run gateway`) that backs the
+    # /fleet topology page's machine/agent health.
+    "fleet_gateway_url": os.getenv("FLEET_GATEWAY_URL", "http://127.0.0.1:5100"),
 }
 
 # Load local overrides (API keys, passwords — never committed to git)

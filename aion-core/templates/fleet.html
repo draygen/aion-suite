@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aion · Fleet</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      background: #16213e; padding: 0.9rem 1.2rem; display: flex; align-items: center;
+      gap: 1rem; border-bottom: 1px solid #0f3460;
+    }
+    header h1 { font-size: 1.3rem; color: #00d9ff; }
+    header .spacer { flex: 1; }
+    header a { color: #9fb3c8; text-decoration: none; font-size: 0.85rem; border: 1px solid #0f3460;
+      padding: 0.35rem 0.7rem; border-radius: 0.5rem; }
+    header a:hover { color: #00d9ff; border-color: #00d9ff; }
+    #meta { font-size: 0.78rem; color: #8b949e; }
+    #banner { padding: 0.5rem 1.2rem; font-size: 0.82rem; display: none; }
+    #banner.show { display: block; }
+    #banner.warn { background: #3a2e12; color: #e3b341; border-bottom: 1px solid #5a4a1a; }
+    .wrap { flex: 1; display: flex; min-height: 0; }
+    #graph { flex: 1; min-width: 0; }
+    svg { width: 100%; height: 100%; display: block; }
+    .legend { display: flex; gap: 1rem; padding: 0.5rem 1.2rem; font-size: 0.75rem;
+      color: #9fb3c8; flex-wrap: wrap; border-top: 1px solid #0f3460; background: #141b2e; }
+    .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    aside {
+      width: 320px; background: #12182b; border-left: 1px solid #0f3460; padding: 1.1rem;
+      overflow-y: auto;
+    }
+    aside h2 { font-size: 1rem; color: #00d9ff; margin-bottom: 0.2rem; }
+    aside .sub { font-size: 0.8rem; color: #8b949e; margin-bottom: 0.8rem; }
+    aside .status-pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 1rem;
+      font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+    aside .detail { margin-top: 0.9rem; font-size: 0.85rem; color: #c9d4e3; line-height: 1.5;
+      word-break: break-word; }
+    aside .agents { margin-top: 1rem; }
+    aside .agents h3 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;
+      color: #8b949e; margin-bottom: 0.5rem; }
+    aside .agent { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem;
+      padding: 0.35rem 0; border-bottom: 1px solid #1e2740; }
+    aside .agent .name { flex: 1; }
+    aside .agent .adetail { color: #6f7d94; font-size: 0.72rem; max-width: 130px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    aside .empty { color: #6f7d94; font-size: 0.85rem; margin-top: 2rem; text-align: center; }
+    /* node visuals */
+    .node { cursor: pointer; }
+    .node rect { transition: stroke-width 0.15s; }
+    .node.selected rect { stroke-width: 3; }
+    .node text { pointer-events: none; }
+    .nlabel { font-size: 13px; font-weight: 600; fill: #f0f6fc; }
+    .nsub { font-size: 10px; fill: #8b949e; }
+    .edge { stroke: #33456b; stroke-width: 1.6; fill: none; }
+    .edge.ssh { stroke-dasharray: 5 4; }
+    .elabel { font-size: 9px; fill: #5c6b8a; text-transform: uppercase; letter-spacing: 0.05em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>◈ Aion Fleet</h1>
+    <span id="meta">loading…</span>
+    <span class="spacer"></span>
+    <a href="/">← Chat</a>
+  </header>
+  <div id="banner"></div>
+  <div class="wrap">
+    <div id="graph">
+      <svg id="svg" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+    <aside id="panel">
+      <div class="empty">Select a node to see details.</div>
+    </aside>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:#3fb950"></i> up</span>
+    <span><i class="dot" style="background:#d29922"></i> degraded</span>
+    <span><i class="dot" style="background:#f85149"></i> down</span>
+    <span><i class="dot" style="background:#8b949e"></i> unknown</span>
+    <span><i class="dot" style="background:#58a6ff"></i> external</span>
+    <span style="margin-left:auto">auto-refresh 12s</span>
+  </div>
+
+  <script>
+    const STATUS_COLOR = {
+      up: "#3fb950", degraded: "#d29922", down: "#f85149",
+      unknown: "#8b949e", external: "#58a6ff",
+    };
+    // Fixed, readable layered layout (id -> center x,y in the 1000x600 viewBox).
+    const POS = {
+      "mcp-client": [95, 300],
+      "mcpbuilder": [300, 300],
+      "aion-core":  [545, 150],
+      "ollama":     [820, 80],
+      "postgres":   [820, 220],
+      "wsl":        [545, 300],
+      "draydev":    [545, 410],
+      "ec2":        [545, 520],
+      "kali":       [820, 410],
+    };
+    const NW = 150, NH = 52;
+    const svg = document.getElementById("svg");
+    const panel = document.getElementById("panel");
+    const meta = document.getElementById("meta");
+    const banner = document.getElementById("banner");
+    let selected = null;
+    let lastData = null;
+
+    const SVGNS = "http://www.w3.org/2000/svg";
+    const el = (tag, attrs = {}) => {
+      const n = document.createElementNS(SVGNS, tag);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+      return n;
+    };
+    const center = (id) => POS[id] || [500, 300];
+
+    function render(data) {
+      lastData = data;
+      const byId = Object.fromEntries(data.nodes.map((n) => [n.id, n]));
+      svg.textContent = "";
+
+      // edges first (behind nodes)
+      for (const e of data.edges) {
+        const [x1, y1] = center(e.from);
+        const [x2, y2] = center(e.to);
+        svg.appendChild(el("line", { x1, y1, x2, y2, class: `edge ${e.kind}` }));
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2 - 4;
+        const t = el("text", { x: mx, y: my, class: "elabel", "text-anchor": "middle" });
+        t.textContent = e.kind;
+        svg.appendChild(t);
+      }
+
+      // nodes
+      for (const n of data.nodes) {
+        const [cx, cy] = center(n.id);
+        const color = STATUS_COLOR[n.status] || STATUS_COLOR.unknown;
+        const g = el("g", { class: "node" + (selected === n.id ? " selected" : "") });
+        g.appendChild(el("rect", {
+          x: cx - NW / 2, y: cy - NH / 2, width: NW, height: NH, rx: 9,
+          fill: "#1c2740", stroke: color, "stroke-width": 2,
+        }));
+        g.appendChild(el("circle", { cx: cx - NW / 2 + 14, cy: cy - NH / 2 + 14, r: 5, fill: color }));
+        const label = el("text", { x: cx, y: cy - 2, class: "nlabel", "text-anchor": "middle" });
+        label.textContent = n.label;
+        g.appendChild(label);
+        if (n.sub) {
+          const sub = el("text", { x: cx, y: cy + 14, class: "nsub", "text-anchor": "middle" });
+          sub.textContent = n.sub;
+          g.appendChild(sub);
+        }
+        g.addEventListener("click", () => { selected = n.id; render(lastData); showPanel(n); });
+        svg.appendChild(g);
+      }
+
+      // refresh open panel with latest data for the selected node
+      if (selected && byId[selected]) showPanel(byId[selected]);
+    }
+
+    function showPanel(n) {
+      const color = STATUS_COLOR[n.status] || STATUS_COLOR.unknown;
+      let html = `<h2>${esc(n.label)}</h2>`;
+      html += `<div class="sub">${esc(n.sub || n.kind)}</div>`;
+      html += `<span class="status-pill" style="background:${color}22;color:${color};border:1px solid ${color}">${esc(n.status)}</span>`;
+      html += `<div class="detail">${esc(n.detail || "")}</div>`;
+      if (Array.isArray(n.agents) && n.agents.length) {
+        html += `<div class="agents"><h3>Agents</h3>`;
+        for (const a of n.agents) {
+          const ac = a.ok ? STATUS_COLOR.up : STATUS_COLOR.down;
+          html += `<div class="agent"><i class="dot" style="background:${ac}"></i>` +
+                  `<span class="name">${esc(a.agent)}</span>` +
+                  `<span class="adetail" title="${esc(a.detail || "")}">${esc(a.detail || "")}</span></div>`;
+        }
+        html += `</div>`;
+      }
+      panel.innerHTML = html;
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    async function poll() {
+      try {
+        const r = await fetch("/api/fleet/topology", { credentials: "same-origin" });
+        if (r.status === 401) { location.href = "/"; return; }
+        const data = await r.json();
+        render(data);
+        const when = data.gateway_updated_at
+          ? new Date(data.gateway_updated_at).toLocaleTimeString() : "—";
+        meta.textContent = `${data.nodes.length} nodes · fleet checked ${when}`;
+        if (!data.gateway_reachable) {
+          banner.className = "show warn";
+          banner.textContent = "⚠ Fleet gateway offline — machine/agent health is unknown. Start it: `npm run gateway` in mcpbuilder.";
+        } else if (data.gateway_refreshing) {
+          banner.className = "show warn";
+          banner.textContent = "⟳ Fleet gateway is probing machines… agent status will update shortly.";
+        } else {
+          banner.className = "";
+        }
+      } catch (err) {
+        meta.textContent = "topology fetch failed";
+      }
+    }
+
+    poll();
+    setInterval(poll, 12000);
+  </script>
+</body>
+</html>
