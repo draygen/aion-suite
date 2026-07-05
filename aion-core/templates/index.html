@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aion</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: #16213e;
+            padding: 1rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-bottom: 1px solid #0f3460;
+            position: relative;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            color: #00d9ff;
+        }
+
+        #tts-toggle {
+            background: none;
+            border: 2px solid #00d9ff;
+            color: #00d9ff;
+            padding: 0.4rem 0.75rem;
+            border-radius: 1rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        #tts-toggle:hover {
+            background: #00d9ff22;
+        }
+
+        #tts-toggle.off {
+            border-color: #666;
+            color: #666;
+        }
+
+        #chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        #status-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: #101a31;
+            border-bottom: 1px solid #0f3460;
+        }
+        .status-panel {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 0.85rem;
+            padding: 0.75rem 0.9rem;
+            min-height: 5rem;
+        }
+        .status-panel h3 {
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #00d9ff;
+            margin-bottom: 0.55rem;
+        }
+        .status-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+        .presence-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.28rem 0.6rem;
+            border-radius: 999px;
+            background: #0f3460;
+            color: #dbeafe;
+            font-size: 0.8rem;
+        }
+        .presence-pill.system {
+            background: #0b5d4b;
+        }
+        #activity-feed {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            max-height: 8rem;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            color: #cbd5e1;
+        }
+        .activity-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+        .activity-ts {
+            color: #7dd3fc;
+            white-space: nowrap;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 0.75rem 1rem;
+            border-radius: 1rem;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+
+        .message-body {
+            white-space: pre-wrap;
+        }
+
+        .message-meta {
+            margin-top: 0.45rem;
+            font-size: 0.72rem;
+            color: rgba(255, 255, 255, 0.62);
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: #0f3460;
+            border-bottom-right-radius: 0.25rem;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+            background: #1f4068;
+            border-bottom-left-radius: 0.25rem;
+        }
+
+        .message.error {
+            background: #5c1a1a;
+            color: #ff6b6b;
+        }
+
+        .message.system {
+            align-self: center;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            color: #9fb7d1;
+        }
+
+        #input-container {
+            padding: 1rem;
+            background: #16213e;
+            border-top: 1px solid #0f3460;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        #message-input {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: 1px solid #0f3460;
+            border-radius: 1.5rem;
+            background: #1a1a2e;
+            color: #eee;
+            font-size: 1rem;
+            outline: none;
+        }
+
+        #message-input:focus {
+            border-color: #00d9ff;
+        }
+
+        #message-input::placeholder {
+            color: #666;
+        }
+
+        #send-btn {
+            padding: 0.75rem 1.5rem;
+            background: #00d9ff;
+            color: #1a1a2e;
+            border: none;
+            border-radius: 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        #send-btn:hover {
+            background: #00b8d9;
+        }
+
+        #send-btn:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
+        .typing-indicator {
+            display: flex;
+            gap: 0.25rem;
+            padding: 0.75rem 1rem;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            background: #00d9ff;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out;
+        }
+
+        .typing-indicator span:nth-child(1) { animation-delay: 0s; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        @media (max-width: 600px) {
+            .message { max-width: 90%; }
+            #status-panels { grid-template-columns: 1fr; }
+        }
+
+        /* Login overlay */
+        #login-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: #1a1a2eee;
+            z-index: 999;
+            align-items: center;
+            justify-content: center;
+        }
+        #login-overlay.visible { display: flex; }
+        #login-box {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 1rem;
+            padding: 2rem;
+            width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        #login-box h2 { color: #00d9ff; text-align: center; font-size: 1.4rem; }
+        #login-box p {
+            margin: 0;
+            color: #9fb7d1;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            text-align: center;
+        }
+        #login-box input {
+            padding: 0.75rem 1rem;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 0.5rem;
+            color: #eee;
+            font-size: 1rem;
+            outline: none;
+        }
+        #login-box input:focus { border-color: #00d9ff; }
+        #login-submit {
+            padding: 0.75rem;
+            background: #00d9ff;
+            color: #1a1a2e;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #login-submit:hover { background: #00b8d9; }
+        #login-error { color: #ff6b6b; font-size: 0.85rem; text-align: center; display: none; }
+        #password-change-fields { display: none; flex-direction: column; gap: 1rem; }
+        #password-change-fields.visible { display: flex; }
+        #password-change-cancel {
+            padding: 0.65rem;
+            background: transparent;
+            color: #9fb7d1;
+            border: 1px solid #355070;
+            border-radius: 0.5rem;
+            font-size: 0.95rem;
+            cursor: pointer;
+            display: none;
+        }
+        #password-change-cancel.visible { display: block; }
+
+        /* Header actions */
+        .header-actions {
+            position: absolute;
+            right: 1rem;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        #user-badge {
+            position: absolute;
+            left: 1rem;
+            font-size: 0.8rem;
+            color: #00d9ff99;
+            display: none;
+        }
+        #logout-btn {
+            background: none;
+            border: 1px solid #ff6b6b44;
+            color: #ff6b6b;
+            padding: 0.4rem 0.75rem;
+            border-radius: 1rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            display: none;
+        }
+        #logout-btn:hover { background: #ff6b6b22; border-color: #ff6b6b; }
+        #channel-select {
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            color: #eee;
+            padding: 0.4rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.85rem;
+            min-width: 10rem;
+        }
+        #channel-select:focus { outline: none; border-color: #00d9ff; }
+        #channel-select option.invited { color: #fbbf24; }
+        #channel-status {
+            position: absolute;
+            left: 8rem;
+            font-size: 0.78rem;
+            color: #9fb7d1;
+        }
+        #admin-btn {
+            background: none;
+            border: 1px solid #00d9ff44;
+            color: #00d9ff;
+            padding: 0.4rem 0.75rem;
+            border-radius: 1rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            text-decoration: none;
+            display: none;
+        }
+        #admin-btn:hover { background: #00d9ff22; border-color: #00d9ff; }
+        #vast-btn {
+            background: none;
+            border: 1px solid #a855f744;
+            color: #a855f7;
+            padding: 0.4rem 0.75rem;
+            border-radius: 1rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            display: none;
+        }
+        #vast-btn:hover { background: #a855f722; border-color: #a855f7; }
+
+        /* Vast Panel overlay */
+        #vast-panel {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: #1a1a2e;
+            z-index: 200;
+            flex-direction: column;
+        }
+        #vast-panel.open { display: flex; }
+        .vast-header {
+            background: #16213e;
+            padding: 0.75rem 1rem;
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            border-bottom: 1px solid #0f3460;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+        .vast-header h2 { color: #a855f7; font-size: 1rem; white-space: nowrap; }
+        .vast-close-btn {
+            background: none; border: none; color: #aaa;
+            font-size: 1.5rem; cursor: pointer; line-height: 1; padding: 0 0.25rem; margin-left: auto;
+        }
+        .vast-close-btn:hover { color: #fff; }
+        .vast-body { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+        .vast-section-title {
+            font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+            color: #a855f788; margin-bottom: 0.5rem;
+            display: flex; align-items: center; gap: 0.75rem;
+        }
+        .vast-section-title::after { content: ""; flex: 1; height: 1px; background: #0f3460; }
+        .vast-filters {
+            display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;
+            background: #16213e; padding: 0.75rem 1rem; border-radius: 0.75rem;
+            border: 1px solid #0f3460;
+        }
+        .vast-filter-group { display: flex; flex-direction: column; gap: 0.25rem; }
+        .vast-filter-group label { font-size: 0.7rem; color: #888; }
+        .vast-filter-group input {
+            padding: 0.4rem 0.6rem; background: #1a1a2e; border: 1px solid #0f3460;
+            border-radius: 0.4rem; color: #eee; font-size: 0.85rem; width: 110px; outline: none;
+        }
+        .vast-filter-group input:focus { border-color: #a855f7; }
+        .vast-btn-primary {
+            padding: 0.45rem 1rem; background: #a855f7; color: #fff; border: none;
+            border-radius: 0.5rem; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+            align-self: flex-end;
+        }
+        .vast-btn-primary:hover { background: #9333ea; }
+        .vast-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+        .vast-table-wrap { overflow-x: auto; }
+        .vast-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .vast-table thead th {
+            text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid #0f3460;
+            color: #888; font-size: 0.7rem; letter-spacing: 0.07em; text-transform: uppercase;
+        }
+        .vast-table tbody tr { border-bottom: 1px solid #0f346022; }
+        .vast-table tbody tr:hover { background: #16213e; }
+        .vast-table tbody td { padding: 0.5rem 0.7rem; vertical-align: middle; }
+        .vast-gpu { font-weight: 600; color: #eee; }
+        .vast-price { color: #a855f7; font-weight: 700; }
+        .vast-rel-high { color: #4caf50; } .vast-rel-med { color: #ff9800; } .vast-rel-low { color: #f44336; }
+        .vast-empty { text-align: center; padding: 2rem; color: #555; font-size: 0.9rem; }
+        .vast-inst-card {
+            background: #16213e; border: 1px solid #0f3460; border-radius: 0.75rem;
+            padding: 0.9rem 1.1rem; display: flex; flex-direction: column; gap: 0.5rem;
+        }
+        .vast-inst-card.running { border-left: 3px solid #4caf50; }
+        .vast-inst-card.loading { border-left: 3px solid #ff9800; }
+        .vast-inst-card.exited, .vast-inst-card.stopped { border-left: 3px solid #f44336; }
+        .vast-inst-top { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+        .vast-inst-gpu { font-weight: 600; }
+        .vast-inst-price { color: #a855f7; font-weight: 600; white-space: nowrap; }
+        .vast-inst-meta { font-size: 0.78rem; color: #888; display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
+        .vast-inst-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .vast-act-btn {
+            padding: 0.3rem 0.7rem; border-radius: 0.4rem; border: none; cursor: pointer;
+            font-size: 0.78rem; font-weight: 600;
+        }
+        .vast-act-btn.stop { background: none; border: 1px solid #f4433644; color: #f44336; }
+        .vast-act-btn.stop:hover { background: #f4433622; border-color: #f44336; }
+        .vast-act-btn.start { background: none; border: 1px solid #4caf5044; color: #4caf50; }
+        .vast-act-btn.start:hover { background: #4caf5022; border-color: #4caf50; }
+        .vast-act-btn.restart { background: none; border: 1px solid #ff980044; color: #ff9800; }
+        .vast-act-btn.restart:hover { background: #ff980022; border-color: #ff9800; }
+        .vast-act-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        #mem-btn {
+            background: none;
+            border: 1px solid #00d9ff44;
+            color: #00d9ff;
+            padding: 0.4rem 0.75rem;
+            border-radius: 1rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        #mem-btn:hover { background: #00d9ff22; border-color: #00d9ff; }
+
+        /* Memory Browser overlay */
+        #memory-browser {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: #1a1a2e;
+            z-index: 200;
+            flex-direction: column;
+        }
+        #memory-browser.open { display: flex; }
+
+        .mem-header {
+            background: #16213e;
+            padding: 0.75rem 1rem;
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            border-bottom: 1px solid #0f3460;
+            flex-shrink: 0;
+        }
+        .mem-header h2 { color: #00d9ff; font-size: 1rem; white-space: nowrap; }
+        #mem-search {
+            flex: 1;
+            padding: 0.45rem 0.9rem;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 1rem;
+            color: #eee;
+            font-size: 0.9rem;
+            outline: none;
+        }
+        #mem-search:focus { border-color: #00d9ff; }
+        #mem-search::placeholder { color: #555; }
+        .mem-close-btn {
+            background: none;
+            border: none;
+            color: #aaa;
+            font-size: 1.5rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0 0.25rem;
+        }
+        .mem-close-btn:hover { color: #fff; }
+
+        .mem-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        /* Category accordion */
+        .mem-category { border: 1px solid #0f3460; border-radius: 0.75rem; overflow: hidden; }
+        .mem-cat-header {
+            padding: 0.7rem 1rem;
+            background: #16213e;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            user-select: none;
+        }
+        .mem-cat-header:hover { background: #1e3050; }
+        .mem-chevron { color: #00d9ff; font-size: 0.75rem; transition: transform 0.2s; }
+        .mem-cat-header.open .mem-chevron { transform: rotate(90deg); }
+        .mem-cat-title { flex: 1; font-weight: 600; color: #eee; font-size: 0.95rem; }
+        .mem-cat-count { font-size: 0.78rem; color: #666; }
+
+        .mem-convs {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.28s ease-out;
+            background: #131e30;
+        }
+        .mem-convs.open { max-height: 4000px; transition: max-height 0.4s ease-in; }
+
+        /* Conversation row */
+        .mem-conv {
+            padding: 0.55rem 1rem 0.55rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 1px solid #0f346022;
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+        .mem-conv:last-of-type { border-bottom: none; }
+        .mem-conv:hover { background: #16213e; }
+        .mem-conv.active { background: #0f3060; }
+        .mem-conv-name { font-size: 0.9rem; color: #ddd; }
+        .mem-conv-meta { font-size: 0.75rem; color: #777; display: flex; gap: 1rem; }
+
+        /* Expanded messages */
+        .mem-messages-wrap {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.35s ease;
+            background: #0d1929;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .mem-messages-wrap.open {
+            max-height: 55vh;
+            overflow-y: auto;
+            padding: 0.75rem 1rem 0.75rem 1.5rem;
+            border-top: 1px solid #0f3460;
+            border-bottom: 1px solid #0f3460;
+        }
+        .mem-loading-msg { color: #888; font-size: 0.85rem; text-align: center; padding: 0.5rem; }
+
+        /* Chat bubbles */
+        .mem-bubble-row { display: flex; }
+        .mem-bubble-row.jenn { justify-content: flex-end; }
+        .mem-bubble-row.other { justify-content: flex-start; }
+        .mem-bubble-col { display: flex; flex-direction: column; max-width: 75%; }
+        .mem-bubble-row.jenn .mem-bubble-col { align-items: flex-end; }
+        .mem-bubble {
+            padding: 0.45rem 0.7rem;
+            border-radius: 0.75rem;
+            font-size: 0.84rem;
+            line-height: 1.45;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .mem-bubble-row.jenn .mem-bubble {
+            background: #0f3460;
+            border-bottom-right-radius: 0.15rem;
+        }
+        .mem-bubble-row.other .mem-bubble {
+            background: #1f4068;
+            border-bottom-left-radius: 0.15rem;
+        }
+        .mem-bubble.post-death { border: 1px solid #884444; opacity: 0.85; }
+        .mem-bubble-meta {
+            font-size: 0.68rem;
+            color: #666;
+            margin-top: 0.15rem;
+            padding: 0 0.2rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Login overlay -->
+    <div id="login-overlay" class="visible">
+        <div id="login-box">
+            <h2>AION</h2>
+            <p id="login-help">Sign in to continue.</p>
+            <input type="text" id="login-username" placeholder="Username" autocomplete="username">
+            <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+            <div id="password-change-fields">
+                <input type="password" id="new-password" placeholder="New password" autocomplete="new-password">
+                <input type="password" id="confirm-password" placeholder="Confirm new password" autocomplete="new-password">
+            </div>
+            <button id="login-submit">Sign In</button>
+            <button id="password-change-cancel">Back to login</button>
+            <div id="login-error"></div>
+        </div>
+    </div>
+
+    <header>
+        <span id="user-badge"></span>
+        <span id="channel-status">#global</span>
+        <h1>AION</h1>
+        <div class="header-actions">
+            <select id="channel-select" title="Select channel"></select>
+            <a id="admin-btn" href="/admin" title="Admin panel">Admin</a>
+            <button id="vast-btn" title="Vast.ai GPU Manager">Vast</button>
+            <button id="logout-btn" title="Sign out">Logout</button>
+            <button id="mem-btn" title="Browse Memory">Memory</button>
+            <button id="tts-toggle" title="Toggle Text-to-Speech">TTS ON</button>
+        </div>
+    </header>
+
+    <div id="status-panels">
+        <div class="status-panel">
+            <h3>Online Users</h3>
+            <div id="online-users" class="status-list"></div>
+        </div>
+        <div class="status-panel">
+            <h3>Live Activity</h3>
+            <div id="activity-feed"></div>
+        </div>
+    </div>
+
+    <div id="chat-container"></div>
+
+    <div id="input-container">
+        <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+        <button id="send-btn">Send</button>
+    </div>
+
+    <!-- Vast Panel overlay -->
+    <div id="vast-panel">
+        <div class="vast-header">
+            <h2>Vast.ai GPU Manager</h2>
+            <button class="vast-close-btn" id="vast-close">×</button>
+        </div>
+        <div class="vast-body">
+            <!-- Instances section -->
+            <div>
+                <div class="vast-section-title">Active Instances <button id="vast-refresh-btn" class="vast-btn-primary" style="font-size:0.78rem;padding:0.25rem 0.6rem;margin-left:0.5rem">Refresh</button></div>
+                <div id="vast-instances-wrap"><div class="vast-empty">Loading...</div></div>
+            </div>
+            <!-- Search offers section -->
+            <div>
+                <div class="vast-section-title">Search GPU Offers</div>
+                <div class="vast-filters">
+                    <div class="vast-filter-group">
+                        <label>Max $/hr</label>
+                        <input type="number" id="vast-max-dph" placeholder="e.g. 0.50" step="0.01" min="0">
+                    </div>
+                    <div class="vast-filter-group">
+                        <label>Min VRAM (GB)</label>
+                        <input type="number" id="vast-min-vram" placeholder="e.g. 24" min="0">
+                    </div>
+                    <div class="vast-filter-group">
+                        <label>GPU Name</label>
+                        <input type="text" id="vast-gpu-name" placeholder="e.g. RTX 3090">
+                    </div>
+                    <button class="vast-btn-primary" id="vast-search-btn">Search</button>
+                </div>
+                <div id="vast-offers-wrap"><div class="vast-empty">Enter filters and click Search.</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Memory Browser overlay -->
+    <div id="memory-browser">
+        <div class="mem-header">
+            <h2>Memory Browser</h2>
+            <input type="text" id="mem-search" placeholder="Search conversations...">
+            <button class="mem-close-btn" id="mem-close">×</button>
+        </div>
+        <div class="mem-body" id="mem-body">
+            <div class="mem-loading-msg">Loading...</div>
+        </div>
+    </div>
+
+    <script>
+        const chatContainer = document.getElementById('chat-container');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const ttsToggle = document.getElementById('tts-toggle');
+
+        let ttsEnabled = true;
+
+        // ── Auth ─────────────────────────────────────────────────────────
+        const loginOverlay  = document.getElementById('login-overlay');
+        const loginUsername = document.getElementById('login-username');
+        const loginPassword = document.getElementById('login-password');
+        const loginHelp     = document.getElementById('login-help');
+        const loginSubmit   = document.getElementById('login-submit');
+        const newPassword   = document.getElementById('new-password');
+        const confirmPassword = document.getElementById('confirm-password');
+        const passwordChangeFields = document.getElementById('password-change-fields');
+        const passwordChangeCancel = document.getElementById('password-change-cancel');
+        const loginError    = document.getElementById('login-error');
+        const userBadge     = document.getElementById('user-badge');
+        const logoutBtn     = document.getElementById('logout-btn');
+        const channelSelect = document.getElementById('channel-select');
+        const channelStatus = document.getElementById('channel-status');
+        const onlineUsers = document.getElementById('online-users');
+        const activityFeed = document.getElementById('activity-feed');
+        let passwordChangeMode = false;
+        let pendingUsername = '';
+        let pendingCurrentPassword = '';
+        let pendingRole = '';
+        const activeChatSession = { channel: 'global', thread_id: 'lobby', session_id: 'global:lobby' };
+        let globalChatJoinedNoticeShown = false;
+        let availableChannels = [];
+        let presencePollHandle = null;
+
+        async function checkAuth() {
+            // SSO from Drayhub portal
+            const params = new URLSearchParams(location.search);
+            const sso = params.get('sso');
+            if (sso) {
+                history.replaceState(null, '', '/');
+                try {
+                    const r = await fetch('/api/sso', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ token: sso }),
+                    });
+                    if (r.ok) {
+                        const data = await r.json();
+                        onLoginSuccess(data.username, data.role, data.chat_session);
+                        return;
+                    }
+                } catch (e) { /* fall through to standard auth */ }
+            }
+            try {
+                const r = await fetch('/api/whoami', { credentials: 'include' });
+                if (r.ok) {
+                    const data = await r.json();
+                    if (data.requires_password_change) {
+                        pendingRole = data.role || '';
+                        enterPasswordChangeMode(data.username);
+                    } else {
+                        onLoginSuccess(data.username, data.role, data.chat_session);
+                    }
+                } else {
+                    loginOverlay.classList.add('visible');
+                    loginUsername.focus();
+                }
+            } catch (e) {
+                loginOverlay.classList.add('visible');
+                loginUsername.focus();
+            }
+        }
+
+        async function doLogin() {
+            const username = loginUsername.value.trim();
+            const password = loginPassword.value;
+            loginError.style.display = 'none';
+            if (passwordChangeMode) {
+                await submitPasswordChange();
+                return;
+            }
+            if (!username || !password) {
+                showLoginError('Please enter username and password.');
+                return;
+            }
+            loginSubmit.disabled = true;
+            try {
+                const r = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password }),
+                });
+                const data = await r.json();
+                if (r.ok) {
+                    if (data.requires_password_change) {
+                        pendingCurrentPassword = password;
+                        pendingRole = data.role || '';
+                        enterPasswordChangeMode(data.username);
+                    } else {
+                        onLoginSuccess(data.username, data.role, data.chat_session);
+                    }
+                } else {
+                    showLoginError(data.error || 'Login failed.');
+                }
+            } catch (e) {
+                showLoginError('Network error. Try again.');
+            }
+            loginSubmit.disabled = false;
+        }
+
+        function showLoginError(msg) {
+            if (!msg) {
+                loginError.textContent = '';
+                loginError.style.display = 'none';
+                return;
+            }
+            loginError.textContent = msg;
+            loginError.style.display = 'block';
+        }
+
+        function enterPasswordChangeMode(username) {
+            passwordChangeMode = true;
+            pendingUsername = username || loginUsername.value.trim();
+            loginOverlay.classList.add('visible');
+            loginUsername.value = pendingUsername;
+            loginUsername.disabled = true;
+            loginHelp.textContent = 'Your password must be changed before you can use Aion.';
+            passwordChangeFields.classList.add('visible');
+            passwordChangeCancel.classList.add('visible');
+            loginSubmit.textContent = 'Change Password';
+            newPassword.value = '';
+            confirmPassword.value = '';
+            newPassword.focus();
+        }
+
+        function exitPasswordChangeMode() {
+            passwordChangeMode = false;
+            pendingCurrentPassword = '';
+            pendingRole = '';
+            loginUsername.disabled = false;
+            loginHelp.textContent = 'Sign in to continue.';
+            passwordChangeFields.classList.remove('visible');
+            passwordChangeCancel.classList.remove('visible');
+            loginSubmit.textContent = 'Sign In';
+            loginPassword.value = '';
+            newPassword.value = '';
+            confirmPassword.value = '';
+            loginUsername.focus();
+        }
+
+        async function submitPasswordChange() {
+            const currentPassword = pendingCurrentPassword || loginPassword.value;
+            const nextPassword = newPassword.value;
+            const confirm = confirmPassword.value;
+            if (!currentPassword) {
+                showLoginError('Current password is missing. Sign in again.');
+                exitPasswordChangeMode();
+                return;
+            }
+            if (!nextPassword || !confirm) {
+                showLoginError('Enter and confirm your new password.');
+                return;
+            }
+            if (nextPassword !== confirm) {
+                showLoginError('New passwords do not match.');
+                return;
+            }
+
+            loginSubmit.disabled = true;
+            try {
+                const r = await fetch('/api/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ current_password: currentPassword, new_password: nextPassword }),
+                });
+                const data = await r.json();
+                if (r.ok) {
+                    exitPasswordChangeMode();
+                    onLoginSuccess(pendingUsername || loginUsername.value.trim(), pendingRole || 'user');
+                    showLoginError('');
+                } else {
+                    showLoginError(data.error || 'Password change failed.');
+                }
+            } catch (e) {
+                showLoginError('Network error. Try again.');
+            }
+            loginSubmit.disabled = false;
+        }
+
+        function syncChatSession(session) {
+            activeChatSession.channel = session?.channel || 'global';
+            activeChatSession.thread_id = session?.thread_id || 'lobby';
+            activeChatSession.session_id = session?.session_id || `${activeChatSession.channel}:${activeChatSession.thread_id}`;
+            channelStatus.textContent = `#${activeChatSession.channel}`;
+            if (channelSelect.value !== activeChatSession.channel) {
+                channelSelect.value = activeChatSession.channel;
+            }
+        }
+
+        function formatTimestamp(value) {
+            const date = value ? new Date(value) : new Date();
+            if (Number.isNaN(date.getTime())) return '';
+            return date.toLocaleString([], {
+                year: 'numeric',
+                month: 'short',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+            });
+        }
+
+        function addMessage(text, type, timestamp = null, meta = '') {
+            const msg = document.createElement('div');
+            msg.className = `message ${type}`;
+
+            const body = document.createElement('div');
+            body.className = 'message-body';
+            body.textContent = text;
+            msg.appendChild(body);
+
+            const details = [];
+            const tsLabel = formatTimestamp(timestamp);
+            if (tsLabel) details.push(tsLabel);
+            if (meta) details.push(meta);
+
+            if (details.length) {
+                const metaEl = document.createElement('div');
+                metaEl.className = 'message-meta';
+                metaEl.textContent = details.join(' · ');
+                msg.appendChild(metaEl);
+            }
+
+            chatContainer.appendChild(msg);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return msg;
+        }
+
+        function announceGlobalChat(username) {
+            if (globalChatJoinedNoticeShown) return;
+            addMessage(`Joined global chat as ${username}.`, 'system', new Date().toISOString(), '#global/lobby');
+            globalChatJoinedNoticeShown = true;
+        }
+
+        function renderChannelOptions(channels) {
+            availableChannels = channels || [];
+            channelSelect.innerHTML = '';
+            for (const channel of availableChannels) {
+                const option = document.createElement('option');
+                option.value = channel.name;
+                const lock = channel.is_private ? '🔒 ' : '#';
+                const inviteTag = channel.has_pending_invite && !channel.membership_role ? ' (invited)' : '';
+                option.textContent = `${lock}${channel.name}${inviteTag}`;
+                if (channel.has_pending_invite && !channel.membership_role) {
+                    option.className = 'invited';
+                }
+                channelSelect.appendChild(option);
+            }
+            if (!availableChannels.length) {
+                const option = document.createElement('option');
+                option.value = 'global';
+                option.textContent = '#global';
+                channelSelect.appendChild(option);
+            }
+        }
+
+        async function loadChannels(preferredChannel = null) {
+            const r = await fetch('/api/channels', { credentials: 'include' });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || 'Failed to load channels.');
+            renderChannelOptions(data.channels || []);
+            const nextChannel = preferredChannel || activeChatSession.channel || data.default_channel?.channel || 'global';
+            if ((data.channels || []).some(c => c.name === nextChannel)) {
+                channelSelect.value = nextChannel;
+            }
+            return data;
+        }
+
+        function renderChannelHistory(messages) {
+            chatContainer.innerHTML = '';
+            for (const msg of messages || []) {
+                const type = msg.role === 'assistant' ? 'assistant' : 'user';
+                const label = msg.role === 'assistant'
+                    ? `#${msg.channel}/${msg.thread_id}`
+                    : `${msg.author_username || 'unknown'} · #${msg.channel}/${msg.thread_id}`;
+                addMessage(msg.content, type, msg.ts, label);
+            }
+        }
+
+        function renderPresence(users) {
+            onlineUsers.innerHTML = '';
+            for (const user of users || []) {
+                const pill = document.createElement('div');
+                pill.className = `presence-pill ${user.is_system ? 'system' : ''}`;
+                pill.textContent = user.display_name;
+                onlineUsers.appendChild(pill);
+            }
+        }
+
+        function activityLabel(item) {
+            if (item.event_type === 'auth_login_success') return `${item.content} signed in`;
+            if (item.event_type === 'auth_logout') return `${item.content} signed out`;
+            if (item.event_type === 'channel_created') return `${item.content} channel created`;
+            if (item.event_type === 'channel_invited') return `${item.content} invited`;
+            if (item.event_type === 'channel_joined') return `${item.content} joined #${item.channel}`;
+            if (item.event_type === 'global_chat_joined') return `${item.content} joined #global`;
+            return `${item.content || item.event_type}`;
+        }
+
+        function renderActivity(activity) {
+            activityFeed.innerHTML = '';
+            for (const item of activity || []) {
+                const row = document.createElement('div');
+                row.className = 'activity-row';
+                const label = document.createElement('span');
+                label.textContent = activityLabel(item);
+                const ts = document.createElement('span');
+                ts.className = 'activity-ts';
+                ts.textContent = formatTimestamp(item.ts);
+                row.appendChild(label);
+                row.appendChild(ts);
+                activityFeed.appendChild(row);
+            }
+        }
+
+        async function refreshPresenceAndActivity(channelName = activeChatSession.channel) {
+            const [presenceResponse, activityResponse] = await Promise.all([
+                fetch(`/api/channels/${encodeURIComponent(channelName)}/presence`, { credentials: 'include' }),
+                fetch(`/api/activity?channel=${encodeURIComponent(channelName)}&limit=20`, { credentials: 'include' })
+            ]);
+            const presenceData = await presenceResponse.json();
+            const activityData = await activityResponse.json();
+            if (presenceResponse.ok) renderPresence(presenceData.users || []);
+            if (activityResponse.ok) renderActivity(activityData.activity || []);
+        }
+
+        function startPresencePolling() {
+            if (presencePollHandle) clearInterval(presencePollHandle);
+            presencePollHandle = setInterval(() => {
+                refreshPresenceAndActivity().catch(() => {});
+            }, 8000);
+        }
+
+        async function loadChannelHistory(channelName) {
+            const r = await fetch(`/api/channels/${encodeURIComponent(channelName)}/history`, { credentials: 'include' });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || 'Failed to load channel history.');
+            renderChannelHistory(data.messages || []);
+            await refreshPresenceAndActivity(channelName);
+        }
+
+        async function switchChannel(channelName) {
+            const channel = availableChannels.find(c => c.name === channelName);
+            if (channel && !channel.membership_role) {
+                const joinResponse = await fetch(`/api/channels/${encodeURIComponent(channelName)}/join`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({})
+                });
+                const joinData = await joinResponse.json();
+                if (!joinResponse.ok) throw new Error(joinData.error || 'Failed to join channel.');
+                await loadChannels(channelName);
+            }
+            syncChatSession({ channel: channelName, thread_id: 'lobby', session_id: `${channelName}:lobby` });
+            await loadChannelHistory(channelName);
+        }
+
+        async function onLoginSuccess(username, role, chatSession = null) {
+            loginOverlay.classList.remove('visible');
+            passwordChangeMode = false;
+            pendingCurrentPassword = '';
+            pendingRole = '';
+            loginPassword.value = '';
+            newPassword.value = '';
+            confirmPassword.value = '';
+            loginUsername.disabled = false;
+            passwordChangeFields.classList.remove('visible');
+            passwordChangeCancel.classList.remove('visible');
+            loginSubmit.textContent = 'Sign In';
+            loginHelp.textContent = 'Sign in to continue.';
+            loginError.style.display = 'none';
+            userBadge.textContent = username;
+            userBadge.style.display = 'block';
+            logoutBtn.style.display = 'block';
+            document.getElementById('admin-btn').style.display = role === 'admin' ? 'block' : 'none';
+            document.getElementById('vast-btn').style.display = (role === 'admin' || role === 'vast') ? 'block' : 'none';
+            syncChatSession(chatSession);
+            await loadChannels(activeChatSession.channel);
+            await loadChannelHistory(activeChatSession.channel);
+            announceGlobalChat(username);
+            startPresencePolling();
+            messageInput.focus();
+        }
+
+        logoutBtn.addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+            location.reload();
+        });
+
+        loginSubmit.addEventListener('click', doLogin);
+        passwordChangeCancel.addEventListener('click', exitPasswordChangeMode);
+        loginPassword.addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+        loginUsername.addEventListener('keypress', e => { if (e.key === 'Enter') loginPassword.focus(); });
+        newPassword.addEventListener('keypress', e => { if (e.key === 'Enter') confirmPassword.focus(); });
+        confirmPassword.addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+        channelSelect.addEventListener('change', async (e) => {
+            try {
+                await switchChannel(e.target.value);
+            } catch (err) {
+                addMessage(`Error: ${err.message}`, 'assistant error', new Date().toISOString(), '#system');
+            }
+        });
+
+        // Check auth on page load
+        checkAuth();
+
+        function showTyping() {
+            const indicator = document.createElement('div');
+            indicator.className = 'message assistant typing-indicator';
+            indicator.innerHTML = '<span></span><span></span><span></span>';
+            chatContainer.appendChild(indicator);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return indicator;
+        }
+
+        function playAudio(base64Audio) {
+            const audio = new Audio('data:audio/mp3;base64,' + base64Audio);
+            audio.play().catch(err => console.warn('Audio playback failed:', err));
+        }
+
+        function toggleTTS() {
+            ttsEnabled = !ttsEnabled;
+            ttsToggle.textContent = ttsEnabled ? 'TTS ON' : 'TTS OFF';
+            ttsToggle.classList.toggle('off', !ttsEnabled);
+        }
+
+        async function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text) return;
+
+            addMessage(text, 'user', new Date().toISOString(), `#${activeChatSession.channel}/${activeChatSession.thread_id}`);
+            messageInput.value = '';
+            sendBtn.disabled = true;
+            messageInput.disabled = true;
+
+            const typing = showTyping();
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        message: text,
+                        tts: ttsEnabled,
+                        channel: activeChatSession.channel,
+                        thread_id: activeChatSession.thread_id,
+                        session_id: activeChatSession.session_id,
+                        metadata: { source: 'web-ui' }
+                    })
+                });
+
+                const data = await response.json();
+                typing.remove();
+
+                if (response.status === 401) {
+                    loginOverlay.classList.add('visible');
+                    loginUsername.focus();
+                } else if (response.status === 403 && data.requires_password_change) {
+                    typing.remove();
+                    enterPasswordChangeMode(userBadge.textContent || loginUsername.value.trim());
+                } else if (data.error) {
+                    addMessage(`Error: ${data.error}`, 'assistant error', new Date().toISOString(), `#${activeChatSession.channel}/${activeChatSession.thread_id}`);
+                } else {
+                    if (data.session) {
+                        syncChatSession(data.session);
+                    }
+                    addMessage(
+                        data.response,
+                        'assistant',
+                        data.timestamp,
+                        `#${activeChatSession.channel}/${activeChatSession.thread_id}`
+                    );
+                    if (data.audio) {
+                        playAudio(data.audio);
+                    }
+                }
+            } catch (err) {
+                typing.remove();
+                addMessage(`Error: ${err.message}`, 'assistant error', new Date().toISOString(), `#${activeChatSession.channel}/${activeChatSession.thread_id}`);
+            }
+
+            sendBtn.disabled = false;
+            messageInput.disabled = false;
+            messageInput.focus();
+        }
+
+        ttsToggle.addEventListener('click', toggleTTS);
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        messageInput.focus();
+
+        // ── Vast Panel ───────────────────────────────────────────────
+        const vastPanel    = document.getElementById('vast-panel');
+        const vastCloseBtn = document.getElementById('vast-close');
+        const vastBtn      = document.getElementById('vast-btn');
+
+        vastBtn.addEventListener('click', () => {
+            vastPanel.classList.add('open');
+            loadVastInstances();
+        });
+        vastCloseBtn.addEventListener('click', () => vastPanel.classList.remove('open'));
+
+        async function loadVastInstances() {
+            const wrap = document.getElementById('vast-instances-wrap');
+            wrap.innerHTML = '<div class="vast-empty">Loading instances...</div>';
+            try {
+                const r = await fetch('/api/admin/vast/instances', { credentials: 'include' });
+                const data = await r.json();
+                if (!r.ok) { wrap.innerHTML = `<div class="vast-empty">${escHtml(data.error || 'Error')}</div>`; return; }
+                renderVastInstances(data.instances || []);
+            } catch (e) {
+                wrap.innerHTML = `<div class="vast-empty">Error: ${escHtml(e.message)}</div>`;
+            }
+        }
+
+        function renderVastInstances(instances) {
+            const wrap = document.getElementById('vast-instances-wrap');
+            if (!instances.length) { wrap.innerHTML = '<div class="vast-empty">No active instances.</div>'; return; }
+            wrap.innerHTML = '';
+            for (const inst of instances) {
+                const status = (inst.actual_status || inst.status || 'unknown').toLowerCase();
+                const card = document.createElement('div');
+                card.className = `vast-inst-card ${status}`;
+                const price = inst.dph_total != null ? `$${Number(inst.dph_total).toFixed(3)}/hr` : '';
+                card.innerHTML = `
+                    <div class="vast-inst-top">
+                        <span class="vast-inst-gpu">${escHtml(inst.gpu_name || 'Unknown GPU')}</span>
+                        <span class="vast-inst-price">${escHtml(price)}</span>
+                    </div>
+                    <div class="vast-inst-meta">
+                        <span>ID: ${inst.id}</span>
+                        <span>Status: ${escHtml(status)}</span>
+                        ${inst.num_gpus ? `<span>${inst.num_gpus}× GPU</span>` : ''}
+                        ${inst.gpu_ram ? `<span>${inst.gpu_ram}GB VRAM</span>` : ''}
+                        ${inst.ssh_host ? `<span>${escHtml(inst.ssh_host)}:${inst.ssh_port || ''}</span>` : ''}
+                    </div>
+                    <div class="vast-inst-actions">
+                        ${status === 'running' || status === 'loading'
+                            ? `<button class="vast-act-btn stop" onclick="vastAction(${inst.id},'stop',this)">Stop</button>
+                               <button class="vast-act-btn restart" onclick="vastAction(${inst.id},'restart',this)">Restart</button>`
+                            : `<button class="vast-act-btn start" onclick="vastAction(${inst.id},'start',this)">Start</button>`}
+                    </div>`;
+                wrap.appendChild(card);
+            }
+        }
+
+        async function vastAction(id, action, btn) {
+            btn.disabled = true;
+            try {
+                const r = await fetch(`/api/admin/vast/instances/${id}/${action}`, { method: 'POST', credentials: 'include' });
+                const data = await r.json();
+                if (!r.ok) alert(data.error || 'Action failed');
+                else setTimeout(loadVastInstances, 1500);
+            } catch (e) { alert(e.message); }
+            btn.disabled = false;
+        }
+
+        document.getElementById('vast-search-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('vast-search-btn');
+            const wrap = document.getElementById('vast-offers-wrap');
+            btn.disabled = true;
+            wrap.innerHTML = '<div class="vast-empty">Searching...</div>';
+            const maxDph  = document.getElementById('vast-max-dph').value.trim();
+            const minVram = document.getElementById('vast-min-vram').value.trim();
+            const gpuName = document.getElementById('vast-gpu-name').value.trim();
+            const qs = new URLSearchParams();
+            if (maxDph)  qs.set('max_dph', maxDph);
+            if (minVram) qs.set('min_gpu_ram', minVram);
+            if (gpuName) qs.set('gpu_name', gpuName);
+            try {
+                const r = await fetch(`/api/admin/vast/offers?${qs}`, { credentials: 'include' });
+                const data = await r.json();
+                if (!r.ok) { wrap.innerHTML = `<div class="vast-empty">${escHtml(data.error || 'Error')}</div>`; }
+                else renderVastOffers(data.offers || []);
+            } catch (e) {
+                wrap.innerHTML = `<div class="vast-empty">Error: ${escHtml(e.message)}</div>`;
+            }
+            btn.disabled = false;
+        });
+
+        document.getElementById('vast-refresh-btn').addEventListener('click', loadVastInstances);
+
+        function renderVastOffers(offers) {
+            const wrap = document.getElementById('vast-offers-wrap');
+            if (!offers.length) { wrap.innerHTML = '<div class="vast-empty">No offers found.</div>'; return; }
+            const rows = offers.slice(0, 50).map(o => {
+                const rel = o.reliability2 != null ? Number(o.reliability2 * 100).toFixed(0) : '—';
+                const relCls = rel >= 95 ? 'vast-rel-high' : rel >= 80 ? 'vast-rel-med' : 'vast-rel-low';
+                return `<tr>
+                    <td class="vast-gpu">${escHtml(o.gpu_name || '?')}</td>
+                    <td>${o.num_gpus || 1}×</td>
+                    <td>${o.gpu_ram || '?'}GB</td>
+                    <td class="vast-price">$${Number(o.dph_total || 0).toFixed(3)}/hr</td>
+                    <td class="${relCls}">${rel}%</td>
+                    <td>${o.cpu_cores_effective || '?'} CPU</td>
+                    <td>${o.cpu_ram ? Math.round(o.cpu_ram) + 'GB' : '?'}</td>
+                </tr>`;
+            }).join('');
+            wrap.innerHTML = `<div class="vast-table-wrap"><table class="vast-table">
+                <thead><tr><th>GPU</th><th>Count</th><th>VRAM</th><th>Price</th><th>Reliability</th><th>CPU</th><th>RAM</th></tr></thead>
+                <tbody>${rows}</tbody></table></div>`;
+        }
+
+        // ── Memory Browser ────────────────────────────────────────────
+        const memBrowser  = document.getElementById('memory-browser');
+        const memBody     = document.getElementById('mem-body');
+        const memSearch   = document.getElementById('mem-search');
+        const memBtn      = document.getElementById('mem-btn');
+        const memCloseBtn = document.getElementById('mem-close');
+
+        let memData = null;
+        let activeConvEl = null;
+
+        const CAT_ORDER = [
+            'Birth & Pregnancy', 'Love & Relationships', 'Family & Parenting',
+            'Health & Wellbeing', 'Loss & Grief', 'Major Life Events', 'General'
+        ];
+        const JENN_NAMES = new Set([
+            'jennifer frotten', 'jennifer wallace', 'jennifer frotten wallace', 'jennifer'
+        ]);
+
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function fmtDate(ts) {
+            if (!ts) return '';
+            return new Date(ts).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        }
+
+        memBtn.addEventListener('click', async () => {
+            memBrowser.classList.add('open');
+            if (!memData) await loadMemData();
+        });
+
+        memCloseBtn.addEventListener('click', () => memBrowser.classList.remove('open'));
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && memBrowser.classList.contains('open'))
+                memBrowser.classList.remove('open');
+        });
+
+        async function loadMemData() {
+            memBody.innerHTML = '<div class="mem-loading-msg">Loading conversations…</div>';
+            try {
+                const r = await fetch('/api/memory/browse');
+                const data = await r.json();
+                memData = data.categories || {};
+                renderCategories(memData);
+            } catch(e) {
+                memBody.innerHTML = `<div class="mem-loading-msg">Error: ${escHtml(e.message)}</div>`;
+            }
+        }
+
+        function renderCategories(cats) {
+            memBody.innerHTML = '';
+            const order = [...CAT_ORDER.filter(c => cats[c]), ...Object.keys(cats).filter(c => !CAT_ORDER.includes(c))];
+
+            for (const catName of order) {
+                const convs = cats[catName];
+                if (!convs || !convs.length) continue;
+
+                const catEl = document.createElement('div');
+                catEl.className = 'mem-category';
+
+                const hdr = document.createElement('div');
+                hdr.className = 'mem-cat-header';
+                hdr.innerHTML = `
+                    <span class="mem-chevron">▶</span>
+                    <span class="mem-cat-title">${escHtml(catName)}</span>
+                    <span class="mem-cat-count">${convs.length} conversation${convs.length !== 1 ? 's' : ''}</span>`;
+
+                const convsEl = document.createElement('div');
+                convsEl.className = 'mem-convs';
+
+                for (const conv of convs) {
+                    const convEl = document.createElement('div');
+                    convEl.className = 'mem-conv';
+                    convEl.dataset.name = (conv.display || '').toLowerCase();
+
+                    const d1 = fmtDate(conv.ts_start), d2 = fmtDate(conv.ts_end);
+                    const dateRange = d1 === d2 ? d1 : `${d1} – ${d2}`;
+
+                    convEl.innerHTML = `
+                        <div class="mem-conv-name">${escHtml(conv.display || conv.thread_id)}</div>
+                        <div class="mem-conv-meta">
+                            <span>${escHtml(dateRange)}</span>
+                            <span>${conv.msg_count} msg${conv.msg_count !== 1 ? 's' : ''}</span>
+                        </div>`;
+
+                    const msgsWrap = document.createElement('div');
+                    msgsWrap.className = 'mem-messages-wrap';
+
+                    convEl.addEventListener('click', () => toggleConversation(convEl, msgsWrap, conv.thread_id));
+
+                    convsEl.appendChild(convEl);
+                    convsEl.appendChild(msgsWrap);
+                }
+
+                hdr.addEventListener('click', () => {
+                    hdr.classList.toggle('open');
+                    convsEl.classList.toggle('open');
+                });
+
+                catEl.appendChild(hdr);
+                catEl.appendChild(convsEl);
+                memBody.appendChild(catEl);
+            }
+        }
+
+        async function toggleConversation(convEl, msgsWrap, threadId) {
+            if (msgsWrap.classList.contains('open')) {
+                msgsWrap.classList.remove('open');
+                convEl.classList.remove('active');
+                return;
+            }
+
+            // Close previously open
+            if (activeConvEl) activeConvEl.classList.remove('active');
+            document.querySelectorAll('.mem-messages-wrap.open').forEach(el => el.classList.remove('open'));
+
+            convEl.classList.add('active');
+            activeConvEl = convEl;
+            msgsWrap.classList.add('open');
+
+            if (!msgsWrap.dataset.loaded) {
+                msgsWrap.innerHTML = '<div class="mem-loading-msg">Loading messages…</div>';
+                try {
+                    const r = await fetch(`/api/memory/thread/${encodeURIComponent(threadId)}`);
+                    const data = await r.json();
+                    msgsWrap.innerHTML = '';
+                    if (data.error) {
+                        msgsWrap.innerHTML = `<div class="mem-loading-msg">${escHtml(data.error)}</div>`;
+                    } else {
+                        renderMessages(msgsWrap, data.messages);
+                        msgsWrap.dataset.loaded = '1';
+                    }
+                } catch(e) {
+                    msgsWrap.innerHTML = `<div class="mem-loading-msg">Error: ${escHtml(e.message)}</div>`;
+                }
+            }
+
+            msgsWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function renderMessages(container, messages) {
+            if (!messages || !messages.length) {
+                container.innerHTML = '<div class="mem-loading-msg">No messages found.</div>';
+                return;
+            }
+            for (const msg of messages) {
+                const isJenn = JENN_NAMES.has(msg.sender.toLowerCase());
+                const row = document.createElement('div');
+                row.className = `mem-bubble-row ${isJenn ? 'jenn' : 'other'}`;
+
+                const col = document.createElement('div');
+                col.className = 'mem-bubble-col';
+
+                const bubble = document.createElement('div');
+                bubble.className = `mem-bubble${msg.post_death ? ' post-death' : ''}`;
+                bubble.textContent = msg.content;
+
+                const meta = document.createElement('div');
+                meta.className = 'mem-bubble-meta';
+                meta.textContent = `${msg.sender} · ${msg.timestamp}${msg.note ? ' · ' + msg.note : ''}`;
+
+                col.appendChild(bubble);
+                col.appendChild(meta);
+                row.appendChild(col);
+                container.appendChild(row);
+            }
+        }
+
+        // Search: filter conversation rows by name
+        memSearch.addEventListener('input', () => {
+            const q = memSearch.value.toLowerCase().trim();
+            document.querySelectorAll('.mem-conv').forEach(el => {
+                const match = !q || el.dataset.name.includes(q);
+                el.style.display = match ? '' : 'none';
+                // Also hide the messages wrap for hidden convs
+                const wrap = el.nextElementSibling;
+                if (wrap && wrap.classList.contains('mem-messages-wrap') && !match) {
+                    wrap.style.display = 'none';
+                } else if (wrap && wrap.classList.contains('mem-messages-wrap') && match) {
+                    wrap.style.display = '';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

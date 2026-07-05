@@ -1,0 +1,36 @@
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.vscode/
+.claude/
+
+# Local secrets and runtime state
+config_local.py
+data/
+.drayops/
+
+# Local model/cache artifacts
+hf_cache/
+lora_mistral_output/
+messages/
+qa/
+
+# Common binary/model/archive artifacts
+**/*.gguf
+**/*.safetensors
+**/*.pt
+**/*.ckpt
+**/*.onnx
+**/*.npy
+**/*.npz
+**/*.parquet
+**/*.sqlite
+**/*.zip
+**/*.7z
+**/*.tar
+**/*.gz
+**/*.mp4
+**/*.wav
+**/*.flac

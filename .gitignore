@@ -1,0 +1,11 @@
+logs/
+pids/
+docs/
+scripts/generate-pdf.py
+**/.venv/
+**/__pycache__/
+*.pyc
+*.log
+aion-core/aion.db
+aion-core/config_local.py
+aion-core/data/

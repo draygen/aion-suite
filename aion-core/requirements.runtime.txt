@@ -1,0 +1,10 @@
+flask
+flask-cors
+requests
+openai
+scikit-learn
+gTTS
+elevenlabs
+bcrypt
+numpy
+httpx

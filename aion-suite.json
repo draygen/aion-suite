@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "name": "aion-suite",
+  "description": "Scoped AION integration stack for the mcpbuilder MCP server: aion-core (Flask :5000) + its Ollama and Postgres dependencies. mcpbuilder is referenced, not managed here.",
+  "suite_root": "/mnt/c/projects/aion-suite",
+  "services": [
+    {
+      "id": "ollama",
+      "display_name": "Ollama (Windows host, GPU)",
+      "kind": "external-dependency",
+      "host": "192.168.0.114",
+      "local_url": "http://127.0.0.1:11434",
+      "model": "aion-producer:latest",
+      "health_check": { "type": "http", "url": "http://127.0.0.1:11434/api/tags", "timeout_sec": 5 },
+      "managed": false,
+      "notes": "Runs on the Windows host (RTX 4060 Ti). WSL reaches it at 127.0.0.1; the LAN/fleet uses 192.168.0.114. Not started/stopped by this suite."
+    },
+    {
+      "id": "postgres",
+      "display_name": "Postgres (aion_db)",
+      "kind": "external-dependency",
+      "local_url": "postgresql://127.0.0.1:5432/aion_db",
+      "container": "mft-server-db-1",
+      "health_check": { "type": "tcp", "host": "127.0.0.1", "port": 5432, "timeout_sec": 5 },
+      "managed": "ensure-running",
+      "notes": "Reuses the existing mft-server-db-1 container to preserve aion_db data. start.sh will 'docker start' it if stopped; stop.sh leaves it up unless --deps."
+    },
+    {
+      "id": "aion-core",
+      "display_name": "AION Core (Flask API)",
+      "kind": "service",
+      "path": "/mnt/c/projects/aion-suite/aion-core",
+      "local_url": "http://127.0.0.1:5000",
+      "pid_file": "/mnt/c/projects/aion-suite/pids/aion-core.pid",
+      "log_file": "/mnt/c/projects/aion-suite/logs/aion-core.log",
+      "health_check": { "type": "http", "url": "http://127.0.0.1:5000/api/health", "timeout_sec": 5 },
+      "managed": true,
+      "start": "aion-core/start-aion-core.sh",
+      "depends_on": ["ollama", "postgres"]
+    },
+    {
+      "id": "mcpbuilder",
+      "display_name": "aion-mcp MCP server",
+      "kind": "reference",
+      "path": "/mnt/c/projects/mcpbuilder",
+      "transport": "stdio",
+      "managed": false,
+      "notes": "Spawned on demand by Claude Desktop / codex (stdio) — nothing to daemonize. start.sh only verifies dist/ is built. Its aion tools call aion-core at 127.0.0.1:5000.",
+      "depends_on": ["aion-core"]
+    }
+  ]
+}

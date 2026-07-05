@@ -1,0 +1,14 @@
+flask
+flask-cors
+openai
+psycopg2-binary
+scikit-learn
+gTTS
+elevenlabs
+bcrypt
+pytest
+numpy
+httpx
+onnxruntime-gpu
+transformers
+huggingface_hub

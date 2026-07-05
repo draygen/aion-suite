@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aion Admin</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #16213e;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #0f3460;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        header h1 { font-size: 1.2rem; color: #00d9ff; letter-spacing: 0.08em; }
+        .header-right { display: flex; gap: 0.75rem; align-items: center; }
+
+        .api-status {
+            font-size: 0.8rem;
+            color: #888;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #888; }
+        .dot.green { background: #4caf50; }
+        .dot.red { background: #f44336; }
+
+        .btn {
+            padding: 0.45rem 1rem;
+            border-radius: 0.5rem;
+            border: none;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.15s;
+        }
+
+        .btn-ghost {
+            background: none;
+            border: 1px solid #0f3460;
+            color: #aaa;
+        }
+
+        .btn-ghost:hover { border-color: #00d9ff; color: #00d9ff; }
+        .btn-primary { background: #00d9ff; color: #1a1a2e; }
+        .btn-primary:hover { background: #00b8d9; }
+        .btn-danger { background: none; border: 1px solid #f4433644; color: #f44336; }
+        .btn-danger:hover { background: #f4433622; border-color: #f44336; }
+        .btn-warn { background: none; border: 1px solid #ff980044; color: #ff9800; }
+        .btn-warn:hover { background: #ff980022; border-color: #ff9800; }
+        .btn-ok { background: none; border: 1px solid #4caf5044; color: #4caf50; }
+        .btn-ok:hover { background: #4caf5022; border-color: #4caf50; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+
+        section { margin-bottom: 2rem; }
+        .section-title {
+            font-size: 0.7rem;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            color: #00d9ff88;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .section-title::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: #0f3460;
+        }
+
+        .instance-grid { display: flex; flex-direction: column; gap: 0.75rem; }
+
+        .instance-card {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 0.75rem;
+            padding: 1rem 1.25rem;
+        }
+
+        .instance-card.running { border-left: 3px solid #4caf50; }
+        .instance-card.loading { border-left: 3px solid #ff9800; }
+        .instance-card.exited { border-left: 3px solid #f44336; }
+        .instance-card.offline { border-left: 3px solid #666; }
+
+        .inst-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .inst-id { font-size: 0.78rem; color: #888; }
+        .inst-gpu { font-size: 1rem; font-weight: 600; color: #eee; }
+        .inst-price { font-size: 1rem; color: #00d9ff; font-weight: 600; white-space: nowrap; }
+
+        .inst-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem 1.5rem;
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 0.75rem;
+        }
+
+        .inst-meta span { display: flex; align-items: center; gap: 0.3rem; }
+
+        .inst-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.75rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 2rem;
+            background: #0f3460;
+        }
+
+        .inst-status-badge.running { color: #4caf50; }
+        .inst-status-badge.loading { color: #ff9800; }
+        .inst-status-badge.exited { color: #f44336; }
+        .inst-status-badge.stopped { color: #f44336; }
+
+        .inst-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+        .filters {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 1rem;
+            background: #16213e;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid #0f3460;
+        }
+
+        .filter-group { display: flex; flex-direction: column; gap: 0.3rem; }
+        .filter-group label { font-size: 0.72rem; color: #888; letter-spacing: 0.05em; }
+
+        .filter-group input {
+            padding: 0.45rem 0.75rem;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 0.4rem;
+            color: #eee;
+            font-size: 0.9rem;
+            width: 120px;
+            outline: none;
+        }
+
+        .filter-group input:focus { border-color: #00d9ff; }
+
+        .offers-wrap { overflow-x: auto; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        thead th {
+            text-align: left;
+            padding: 0.6rem 0.75rem;
+            border-bottom: 1px solid #0f3460;
+            color: #888;
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        tbody tr { border-bottom: 1px solid #0f346022; transition: background 0.1s; }
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr:hover { background: #16213e; }
+        tbody td { padding: 0.6rem 0.75rem; vertical-align: middle; }
+
+        .gpu-cell { font-weight: 600; color: #eee; }
+        .price-cell { color: #00d9ff; font-weight: 700; white-space: nowrap; }
+        .rel-cell { font-size: 0.8rem; }
+        .rel-high { color: #4caf50; }
+        .rel-med { color: #ff9800; }
+        .rel-low { color: #f44336; }
+
+        .empty-state,
+        #offers-loading,
+        #offers-empty,
+        #ops-output-empty {
+            text-align: center;
+            padding: 2rem;
+            color: #555;
+            font-size: 0.9rem;
+        }
+
+        .empty-state {
+            background: #16213e22;
+            border: 1px dashed #0f3460;
+            border-radius: 0.75rem;
+        }
+
+        #modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: #00000099;
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #modal-overlay.open { display: flex; }
+
+        #modal-box {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 1rem;
+            padding: 1.75rem;
+            width: 380px;
+            max-width: 95vw;
+        }
+
+        #modal-box h3 { color: #00d9ff; margin-bottom: 1rem; font-size: 1.1rem; }
+
+        #modal-details {
+            background: #1a1a2e;
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            line-height: 1.8;
+            margin-bottom: 1rem;
+            color: #ccc;
+        }
+
+        .modal-field { display: flex; justify-content: space-between; }
+        .modal-field span:first-child { color: #888; }
+        .modal-field span:last-child { color: #eee; font-weight: 600; }
+
+        #modal-disk-label { font-size: 0.78rem; color: #888; margin-bottom: 0.3rem; display: block; }
+        #modal-disk {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 0.4rem;
+            color: #eee;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+            outline: none;
+        }
+
+        #modal-disk:focus { border-color: #00d9ff; }
+        .modal-actions { display: flex; gap: 0.5rem; }
+        #modal-result { font-size: 0.82rem; margin-top: 0.75rem; }
+        #modal-result.ok { color: #4caf50; }
+        #modal-result.err { color: #f44336; }
+
+        #toast {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 0.5rem;
+            padding: 0.75rem 1.25rem;
+            font-size: 0.85rem;
+            color: #eee;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s;
+            pointer-events: none;
+            z-index: 200;
+            max-width: 320px;
+        }
+
+        #toast.show { opacity: 1; transform: translateY(0); }
+        #toast.ok { border-color: #4caf5066; color: #4caf50; }
+        #toast.err { border-color: #f4433666; color: #f44336; }
+
+        .ops-panel {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 0.75rem;
+            padding: 1rem;
+            display: grid;
+            gap: 1rem;
+        }
+
+        .ops-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 1rem;
+        }
+
+        .ops-card {
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 0.6rem;
+            padding: 1rem;
+        }
+
+        .ops-card h3 {
+            color: #00d9ff;
+            margin-bottom: 0.75rem;
+            font-size: 0.95rem;
+        }
+
+        .ops-card p {
+            color: #8da7c4;
+            font-size: 0.82rem;
+            line-height: 1.5;
+            margin-bottom: 0.75rem;
+        }
+
+        .ops-card textarea,
+        .ops-card input {
+            width: 100%;
+            padding: 0.65rem 0.75rem;
+            background: #10182d;
+            border: 1px solid #0f3460;
+            border-radius: 0.45rem;
+            color: #eee;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .ops-card textarea {
+            min-height: 140px;
+            resize: vertical;
+        }
+
+        .ops-card textarea:focus,
+        .ops-card input:focus {
+            border-color: #00d9ff;
+        }
+
+        .ops-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.75rem;
+        }
+
+        .tool-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            margin-top: 0.75rem;
+        }
+
+        .tool-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.3rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.76rem;
+            border: 1px solid #355070;
+            color: #9fb7d1;
+        }
+
+        .tool-badge.ok {
+            border-color: #2e7d32;
+            color: #7bd389;
+        }
+
+        .preset-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        #ops-output {
+            white-space: pre-wrap;
+            background: #10182d;
+            border: 1px solid #0f3460;
+            border-radius: 0.6rem;
+            padding: 1rem;
+            min-height: 220px;
+            font-size: 0.82rem;
+            line-height: 1.45;
+            color: #d7e6f7;
+            overflow-x: auto;
+        }
+
+        .ops-note {
+            font-size: 0.78rem;
+            color: #7088a0;
+        }
+
+        @media (max-width: 900px) {
+            .ops-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>AION ADMIN</h1>
+    <div class="header-right">
+        <div class="api-status">
+            <div class="dot" id="api-dot"></div>
+            <span id="api-status-text">Checking...</span>
+        </div>
+        <button class="btn btn-ghost" onclick="refreshAll()">Refresh</button>
+        <a href="/" style="text-decoration:none">
+            <button class="btn btn-ghost">Chat</button>
+        </a>
+    </div>
+</header>
+
+<main>
+    <!-- ── User Management ─────────────────────────────────── -->
+    <section id="users-section">
+        <div class="section-title">User Management</div>
+
+        <!-- Create user form -->
+        <div class="ops-panel" style="margin-bottom:1rem">
+            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end">
+                <div class="filter-group">
+                    <label>Username</label>
+                    <input type="text" id="new-username" placeholder="username" style="width:140px">
+                </div>
+                <div class="filter-group">
+                    <label>Password</label>
+                    <input type="password" id="new-password" placeholder="min 10 chars" style="width:160px">
+                </div>
+                <div class="filter-group">
+                    <label>Role</label>
+                    <select id="new-role" style="padding:0.45rem 0.75rem;background:#1a1a2e;border:1px solid #0f3460;border-radius:0.4rem;color:#eee;font-size:0.9rem;outline:none">
+                        <option value="user">user</option>
+                        <option value="vast">vast</option>
+                        <option value="admin">admin</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>&nbsp;</label>
+                    <button class="btn btn-primary" onclick="createUser()">Add User</button>
+                </div>
+                <div id="create-user-msg" style="font-size:0.82rem;align-self:center"></div>
+            </div>
+        </div>
+
+        <!-- Users table -->
+        <div style="overflow-x:auto">
+            <table id="users-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Must Change PW</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="users-body">
+                    <tr><td colspan="6" style="text-align:center;color:#555;padding:1.5rem">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section>
+        <div class="section-title">Instances</div>
+        <div class="instance-grid" id="instances-list">
+            <div class="empty-state">Loading...</div>
+        </div>
+    </section>
+
+    <section>
+        <div class="section-title">Find GPU Servers</div>
+
+        <div class="filters">
+            <div class="filter-group">
+                <label>Max $/hr</label>
+                <input type="number" id="f-max-dph" placeholder="e.g. 2.00" step="0.1" min="0">
+            </div>
+            <div class="filter-group">
+                <label>Min GPU VRAM (GB)</label>
+                <input type="number" id="f-min-vram" placeholder="e.g. 16" step="1" min="0">
+            </div>
+            <div class="filter-group">
+                <label>GPU Name</label>
+                <input type="text" id="f-gpu-name" placeholder="e.g. RTX_4090" style="width:160px">
+            </div>
+            <div class="filter-group" style="justify-content:flex-end">
+                <label>&nbsp;</label>
+                <button class="btn btn-primary" id="search-btn" onclick="searchOffers()">Search</button>
+            </div>
+        </div>
+
+        <div class="offers-wrap">
+            <div id="offers-loading" style="display:none">Loading offers...</div>
+            <div id="offers-empty" style="display:none">No offers found. Try relaxing the filters.</div>
+            <table id="offers-table" style="display:none">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>GPU</th>
+                        <th>VRAM</th>
+                        <th>Count</th>
+                        <th>System RAM</th>
+                        <th>Disk</th>
+                        <th>Net (up/down Mbps)</th>
+                        <th>Reliability</th>
+                        <th>$/hr</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="offers-body"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section>
+        <div class="section-title">Ops Tools</div>
+        <div class="ops-panel">
+            <div class="ops-grid">
+                <div class="ops-card">
+                    <h3>Authorized Targets</h3>
+                    <p>One host, wildcard, IP, or CIDR per line. Aion will only run network checks against these values.</p>
+                    <textarea id="ops-targets" placeholder="example.com&#10;*.example.com&#10;203.0.113.10&#10;10.0.0.0/24"></textarea>
+                    <div class="ops-actions">
+                        <button class="btn btn-primary" id="ops-save-btn" onclick="saveOpsConfig()">Save Targets</button>
+                    </div>
+                    <div class="tool-badges" id="ops-tool-badges"></div>
+                    <div class="ops-note">Changes here are runtime-only until you persist them into your remote config.</div>
+                </div>
+                <div class="ops-card">
+                    <h3>Run Authorized Check</h3>
+                    <p>Examples: <code>scan http://app.example.com</code>, <code>httpx app.example.com</code>, <code>whatweb https://app.example.com</code>, <code>nikto https://app.example.com</code>.</p>
+                    <input id="ops-command" type="text" placeholder="ping api.example.com">
+                    <div class="preset-grid">
+                        <button class="btn btn-ghost" onclick="setOpsCommand('scan http://183.89.209.74:56635')">Web Scan Self</button>
+                        <button class="btn btn-ghost" onclick="setOpsCommand('httpx http://183.89.209.74:56635')">httpx Self</button>
+                        <button class="btn btn-ghost" onclick="setOpsCommand('whatweb http://183.89.209.74:56635')">WhatWeb Self</button>
+                        <button class="btn btn-ghost" onclick="setOpsCommand('nikto http://183.89.209.74:56635')">Nikto Self</button>
+                        <button class="btn btn-ghost" onclick="setOpsCommand('testssl 183.89.209.74')">TLS Self</button>
+                        <button class="btn btn-ghost" onclick="setOpsCommand('zap http://183.89.209.74:56635')">ZAP Baseline Self</button>
+                        <button class="btn btn-ghost" onclick="setOpsCommand('ffuf http://183.89.209.74:56635')">ffuf Self</button>
+                    </div>
+                    <div class="ops-actions">
+                        <button class="btn btn-primary" id="ops-run-btn" onclick="runOpsCommand()">Run</button>
+                    </div>
+                </div>
+            </div>
+            <div class="ops-card">
+                <h3>Output</h3>
+                <div id="ops-output">No command run yet.</div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<div id="modal-overlay">
+    <div id="modal-box">
+        <h3>Deploy Aion</h3>
+        <div id="modal-details"></div>
+        <label id="modal-disk-label" for="modal-disk">Disk (GB)</label>
+        <input type="number" id="modal-disk" value="40" min="16" max="500">
+        <div class="modal-actions">
+            <button class="btn btn-primary" id="modal-confirm-btn" onclick="confirmDeploy()">Deploy</button>
+            <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        </div>
+        <div id="modal-result"></div>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+    let pendingOffer = null;
+    let opsConfig = null;
+
+    // ── User Management ───────────────────────────────────────────────
+    async function loadUsers() {
+        const tbody = document.getElementById('users-body');
+        try {
+            const r = await fetch('/api/admin/users', { credentials: 'include' });
+            const data = await r.json();
+            if (!r.ok) { tbody.innerHTML = `<tr><td colspan="6" style="color:#f44336;padding:1rem">${data.error}</td></tr>`; return; }
+            renderUsers(data.users || []);
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="6" style="color:#f44336;padding:1rem">Error: ${e.message}</td></tr>`;
+        }
+    }
+
+    function renderUsers(users) {
+        const tbody = document.getElementById('users-body');
+        if (!users.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#555;padding:1.5rem">No users.</td></tr>'; return; }
+        tbody.innerHTML = users.map(u => {
+            const mustChange = u.must_change_password ? '<span style="color:#ff9800">Yes</span>' : 'No';
+            const created = u.created ? new Date(u.created).toLocaleDateString('en-US',{month:'numeric',day:'numeric',year:'numeric'}) : '—';
+            const roleSel = ['user','vast','admin'].map(r =>
+                `<option value="${r}"${u.role===r?' selected':''}>${r}</option>`).join('');
+            return `<tr id="user-row-${u.id}">
+                <td style="color:#888">${u.id}</td>
+                <td style="font-weight:600">${esc(u.username)}</td>
+                <td>
+                    <select onchange="updateRole(${u.id},this.value)"
+                        style="padding:0.3rem 0.5rem;background:#1a1a2e;border:1px solid #0f3460;border-radius:0.4rem;color:#eee;font-size:0.82rem;outline:none">
+                        ${roleSel}
+                    </select>
+                </td>
+                <td>${mustChange}</td>
+                <td style="color:#888;font-size:0.8rem">${created}</td>
+                <td>
+                    <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
+                        <button class="btn btn-warn" onclick="resetPassword(${u.id},'${esc(u.username)}')">Reset PW</button>
+                        <button class="btn btn-danger" onclick="deleteUser(${u.id},'${esc(u.username)}')">Delete</button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function createUser() {
+        const username = document.getElementById('new-username').value.trim();
+        const password = document.getElementById('new-password').value;
+        const role     = document.getElementById('new-role').value;
+        const msg      = document.getElementById('create-user-msg');
+        msg.textContent = '';
+        if (!username || !password) { msg.style.color='#f44336'; msg.textContent='Username and password required.'; return; }
+        try {
+            const r = await fetch('/api/admin/users', {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, role, must_change_password: true }),
+            });
+            const data = await r.json();
+            if (r.ok) {
+                msg.style.color='#4caf50'; msg.textContent=`Created: ${data.username}`;
+                document.getElementById('new-username').value='';
+                document.getElementById('new-password').value='';
+                loadUsers();
+            } else {
+                msg.style.color='#f44336'; msg.textContent=data.error||'Error';
+            }
+        } catch(e) { msg.style.color='#f44336'; msg.textContent=e.message; }
+    }
+
+    async function updateRole(id, role) {
+        try {
+            const r = await fetch(`/api/admin/users/${id}/role`, {
+                method: 'PATCH', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role }),
+            });
+            const data = await r.json();
+            if (r.ok) toast(`Role updated to ${role}`, 'ok');
+            else toast(data.error || 'Error', 'err');
+        } catch(e) { toast(e.message, 'err'); }
+    }
+
+    async function resetPassword(id, username) {
+        const pw = prompt(`New password for ${username} (min 10 chars):`);
+        if (!pw) return;
+        try {
+            const r = await fetch(`/api/admin/users/${id}/reset-password`, {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw }),
+            });
+            const data = await r.json();
+            if (r.ok) toast('Password reset. User must change on next login.', 'ok');
+            else toast(data.error || 'Error', 'err');
+        } catch(e) { toast(e.message, 'err'); }
+    }
+
+    async function deleteUser(id, username) {
+        if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+        try {
+            const r = await fetch(`/api/admin/users/${id}`, { method: 'DELETE', credentials: 'include' });
+            const data = await r.json();
+            if (r.ok) { toast(`Deleted ${username}`, 'ok'); loadUsers(); }
+            else toast(data.error || 'Error', 'err');
+        } catch(e) { toast(e.message, 'err'); }
+    }
+
+    function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+    function fmt(v, unit='') { return v != null ? `${v}${unit}` : '-'; }
+    function fmtGb(mb) { return mb ? `${(mb / 1024).toFixed(0)} GB` : '-'; }
+    function fmtRel(r) {
+        if (r == null) return '-';
+        const pct = (r * 100).toFixed(1) + '%';
+        if (r >= 0.99) return `<span class="rel-cell rel-high">${pct}</span>`;
+        if (r >= 0.95) return `<span class="rel-cell rel-med">${pct}</span>`;
+        return `<span class="rel-cell rel-low">${pct}</span>`;
+    }
+    function fmtUptime(secs) {
+        if (!secs) return '-';
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        return h ? `${h}h ${m}m` : `${m}m`;
+    }
+    function statusClass(s) {
+        if (!s) return 'offline';
+        s = s.toLowerCase();
+        if (s === 'running') return 'running';
+        if (s === 'exited' || s === 'stopped') return 'exited';
+        return 'loading';
+    }
+    function canStart(inst) {
+        const s = String(inst.actual_status || inst.cur_state || '').toLowerCase();
+        return s === 'stopped' || s === 'exited';
+    }
+    function canStop(inst) {
+        const s = String(inst.actual_status || inst.cur_state || '').toLowerCase();
+        return s === 'running';
+    }
+    function toast(msg, type='ok') {
+        const el = document.getElementById('toast');
+        el.textContent = msg;
+        el.className = 'show ' + type;
+        clearTimeout(el._t);
+        el._t = setTimeout(() => el.className = '', 3500);
+    }
+
+    async function checkAdmin() {
+        const r = await fetch('/api/whoami', { credentials: 'include' });
+        if (!r.ok) { location.href = '/'; return false; }
+        const d = await r.json();
+        if (d.role !== 'admin' && d.role !== 'vast') {
+            document.body.innerHTML = '<p style="padding:2rem;color:#f44336">Access denied.</p>';
+            return false;
+        }
+        return true;
+    }
+
+    async function checkApiStatus() {
+        const dot = document.getElementById('api-dot');
+        const txt = document.getElementById('api-status-text');
+        try {
+            const r = await fetch('/api/admin/vast/instances', { credentials: 'include' });
+            if (r.ok) {
+                dot.className = 'dot green';
+                txt.textContent = 'Vast.ai Connected';
+            } else {
+                const d = await r.json();
+                dot.className = 'dot red';
+                txt.textContent = d.error || 'API Error';
+            }
+        } catch (e) {
+            dot.className = 'dot red';
+            txt.textContent = 'Error';
+        }
+    }
+
+    async function loadOpsConfig() {
+        try {
+            const r = await fetch('/api/admin/network/config', { credentials: 'include' });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Failed to load ops config');
+            opsConfig = d;
+            document.getElementById('ops-targets').value = (d.authorized_network_targets || []).join('\n');
+            renderToolBadges(d.available_tools || []);
+        } catch (e) {
+            document.getElementById('ops-output').textContent = 'Failed to load ops config: ' + e.message;
+        }
+    }
+
+    function renderToolBadges(tools) {
+        const el = document.getElementById('ops-tool-badges');
+        el.innerHTML = (tools || []).map(tool => `
+            <span class="tool-badge ${tool.installed ? 'ok' : ''}">
+                <span>${tool.label}</span>
+                <span>${tool.installed ? 'ready' : 'missing'}</span>
+            </span>
+        `).join('');
+    }
+
+    function setOpsCommand(value) {
+        document.getElementById('ops-command').value = value;
+    }
+
+    async function saveOpsConfig() {
+        const btn = document.getElementById('ops-save-btn');
+        const targets = document.getElementById('ops-targets').value
+            .split(/\r?\n/)
+            .map(s => s.trim())
+            .filter(Boolean);
+        btn.disabled = true;
+        try {
+            const r = await fetch('/api/admin/network/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ authorized_network_targets: targets }),
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) throw new Error(d.error || 'Save failed');
+            opsConfig = d;
+            renderToolBadges(d.available_tools || []);
+            toast('Authorized targets updated', 'ok');
+        } catch (e) {
+            toast('Save failed: ' + e.message, 'err');
+        }
+        btn.disabled = false;
+    }
+
+    async function runOpsCommand() {
+        const btn = document.getElementById('ops-run-btn');
+        const command = document.getElementById('ops-command').value.trim();
+        if (!command) {
+            toast('Enter a command first', 'err');
+            return;
+        }
+        btn.disabled = true;
+        document.getElementById('ops-output').textContent = 'Running...';
+        try {
+            const r = await fetch('/api/admin/network/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ command }),
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) throw new Error(d.error || 'Command failed');
+            document.getElementById('ops-output').textContent = d.result || '(no output)';
+        } catch (e) {
+            document.getElementById('ops-output').textContent = 'Error: ' + e.message;
+            toast('Ops command failed: ' + e.message, 'err');
+        }
+        btn.disabled = false;
+    }
+
+    async function loadInstances() {
+        const container = document.getElementById('instances-list');
+        try {
+            const r = await fetch('/api/admin/vast/instances', { credentials: 'include' });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error);
+            const list = d.instances || [];
+            if (!list.length) {
+                container.innerHTML = '<div class="empty-state">No instances found.</div>';
+                return;
+            }
+            container.innerHTML = list.map(renderInstance).join('');
+        } catch (e) {
+            container.innerHTML = `<div class="empty-state" style="color:#f44336">Error: ${esc(e.message)}</div>`;
+        }
+    }
+
+    function renderInstance(inst) {
+        const sc = statusClass(inst.actual_status || inst.cur_state);
+        const gpu = inst.num_gpus > 1 ? `${inst.gpu_name} x ${inst.num_gpus}` : (inst.gpu_name || 'Unknown GPU');
+        const vram = fmtGb(inst.gpu_totalram || inst.gpu_ram);
+        const ram = fmtGb(inst.cpu_ram);
+        const ssh = inst.ssh_host ? `${inst.ssh_host}:${inst.ssh_port}` : '-';
+        const web = inst.public_ipaddr ? `http://${inst.public_ipaddr}:5000` : null;
+        const uptime = fmtUptime(inst.uptime_mins ? inst.uptime_mins * 60 : null);
+        const dot = sc === 'running' ? 'green' : sc === 'exited' ? 'red' : '';
+
+        return `
+        <div class="instance-card ${sc}">
+            <div class="inst-top">
+                <div>
+                    <div class="inst-id">#${inst.id} &nbsp;|&nbsp; <span class="inst-status-badge ${sc}">
+                        <span class="dot ${dot}"></span>
+                        ${inst.actual_status || inst.cur_state || 'unknown'}
+                    </span></div>
+                    <div class="inst-gpu">${esc(gpu)} &nbsp;(${vram} VRAM)</div>
+                </div>
+                <div class="inst-price">$${(inst.dph_total || 0).toFixed(3)}/hr</div>
+            </div>
+            <div class="inst-meta">
+                <span>CPU ${esc(inst.cpu_name || '-')} | ${inst.cpu_cores || '?'} cores | ${ram} RAM</span>
+                <span>Disk ${fmt(inst.disk_space, ' GB')}</span>
+                ${ssh !== '-' ? `<span>SSH: <code style="color:#00d9ff;font-size:0.78rem">root@${esc(ssh)}</code></span>` : ''}
+                ${web ? `<span>Web: <a href="${esc(web)}" target="_blank" style="color:#00d9ff;font-size:0.8rem">${esc(web)}</a></span>` : ''}
+                ${uptime !== '-' ? `<span>Uptime: ${uptime}</span>` : ''}
+            </div>
+            <div class="inst-actions">
+                ${canStart(inst) ? `
+                <button class="btn btn-ok" onclick="startInstance(${inst.id})">Start</button>` : ''}
+                ${canStop(inst) ? `
+                <button class="btn btn-warn" onclick="stopInstance(${inst.id})">Stop</button>` : ''}
+                ${inst.ssh_host ? `
+                <button class="btn btn-ghost" onclick="restartInstance(${inst.id})">Restart</button>
+                <button class="btn btn-warn" onclick="redeployInstance(${inst.id}, '${esc(inst.ssh_host)}', ${inst.ssh_port})">Redeploy Code</button>` : ''}
+                <button class="btn btn-danger" onclick="destroyInstance(${inst.id})">Destroy</button>
+            </div>
+        </div>`;
+    }
+
+    async function searchOffers() {
+        const btn = document.getElementById('search-btn');
+        const loading = document.getElementById('offers-loading');
+        const empty = document.getElementById('offers-empty');
+        const table = document.getElementById('offers-table');
+        const body = document.getElementById('offers-body');
+
+        btn.disabled = true;
+        loading.style.display = 'block';
+        empty.style.display = 'none';
+        table.style.display = 'none';
+
+        const params = new URLSearchParams();
+        const maxDph = document.getElementById('f-max-dph').value;
+        const minVram = document.getElementById('f-min-vram').value;
+        const gpuName = document.getElementById('f-gpu-name').value;
+        if (maxDph) params.set('max_dph', maxDph);
+        if (minVram) params.set('min_gpu_ram', minVram);
+        if (gpuName) params.set('gpu_name', gpuName);
+
+        try {
+            const r = await fetch('/api/admin/vast/offers?' + params, { credentials: 'include' });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error);
+            const offers = d.offers || [];
+
+            loading.style.display = 'none';
+            if (!offers.length) {
+                empty.style.display = 'block';
+                btn.disabled = false;
+                return;
+            }
+
+            body.innerHTML = offers.map((o, i) => `
+                <tr>
+                    <td style="color:#555">${i + 1}</td>
+                    <td class="gpu-cell">${esc(o.gpu_name || '?')}</td>
+                    <td>${fmtGb(o.gpu_ram)}</td>
+                    <td style="text-align:center">${o.num_gpus || 1}</td>
+                    <td>${fmtGb(o.cpu_ram)}</td>
+                    <td>${fmt(o.disk_space, ' GB')}</td>
+                    <td style="font-size:0.78rem;color:#888">${o.inet_up ? Math.round(o.inet_up) : '?'} / ${o.inet_down ? Math.round(o.inet_down) : '?'}</td>
+                    <td>${fmtRel(o.reliability || o.reliability2)}</td>
+                    <td class="price-cell">$${(o.dph_total || 0).toFixed(3)}</td>
+                    <td><button class="btn btn-primary" style="font-size:0.78rem;padding:0.35rem 0.75rem"
+                        onclick="openDeploy(${o.id}, ${JSON.stringify(esc(o.gpu_name || '?'))}, ${o.num_gpus || 1}, ${(o.dph_total || 0).toFixed(3)}, ${fmtGb(o.gpu_ram).replace(' GB','')})">
+                        Deploy
+                    </button></td>
+                </tr>`).join('');
+
+            table.style.display = 'table';
+        } catch (e) {
+            loading.style.display = 'none';
+            empty.style.display = 'block';
+            empty.textContent = 'Error: ' + e.message;
+        }
+        btn.disabled = false;
+    }
+
+    function openDeploy(offerId, gpuName, numGpus, dph, vramGb) {
+        pendingOffer = offerId;
+        document.getElementById('modal-details').innerHTML = `
+            <div class="modal-field"><span>GPU</span><span>${gpuName} x ${numGpus}</span></div>
+            <div class="modal-field"><span>VRAM</span><span>${vramGb} GB</span></div>
+            <div class="modal-field"><span>Price</span><span style="color:#00d9ff">$${parseFloat(dph).toFixed(3)}/hr</span></div>
+            <div class="modal-field"><span>Image</span><span>ubuntu:22.04</span></div>
+            <div class="modal-field"><span>Auto-deploys</span><span>Ollama + ${esc('model from config')} + Aion</span></div>`;
+        document.getElementById('modal-result').textContent = '';
+        document.getElementById('modal-confirm-btn').disabled = false;
+        document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function closeModal() {
+        document.getElementById('modal-overlay').classList.remove('open');
+        pendingOffer = null;
+    }
+
+    async function confirmDeploy() {
+        if (!pendingOffer) return;
+        const diskGb = parseInt(document.getElementById('modal-disk').value, 10) || 40;
+        const btn = document.getElementById('modal-confirm-btn');
+        const result = document.getElementById('modal-result');
+        btn.disabled = true;
+        result.className = '';
+        result.textContent = 'Deploying...';
+
+        try {
+            const r = await fetch('/api/admin/vast/deploy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ offer_id: pendingOffer, disk_gb: diskGb }),
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) throw new Error(d.error || 'Deploy failed');
+            const contractId = d.result?.new_contract || '?';
+            result.className = 'ok';
+            result.textContent = `Instance #${contractId} created. Setup takes a few minutes.`;
+            toast(`Deployed instance #${contractId}`, 'ok');
+            setTimeout(() => { closeModal(); loadInstances(); }, 2000);
+        } catch (e) {
+            result.className = 'err';
+            result.textContent = 'Error: ' + e.message;
+            btn.disabled = false;
+        }
+    }
+
+    async function destroyInstance(id) {
+        if (!confirm(`Destroy instance #${id}? This is irreversible and deletes all data.`)) return;
+        try {
+            const r = await fetch(`/api/admin/vast/instances/${id}`, {
+                method: 'DELETE',
+                credentials: 'include',
+            });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error);
+            toast(`Instance #${id} destroyed`, 'ok');
+            loadInstances();
+        } catch (e) {
+            toast('Destroy failed: ' + e.message, 'err');
+        }
+    }
+
+    async function startInstance(id) {
+        try {
+            const r = await fetch(`/api/admin/vast/instances/${id}/start`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) throw new Error(d.error || 'Start failed');
+            toast(`Instance #${id} start signal sent`, 'ok');
+            loadInstances();
+        } catch (e) {
+            toast('Start failed: ' + e.message, 'err');
+        }
+    }
+
+    async function stopInstance(id) {
+        if (!confirm(`Stop instance #${id}? Compute billing should pause once it stops.`)) return;
+        try {
+            const r = await fetch(`/api/admin/vast/instances/${id}/stop`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) throw new Error(d.error || 'Stop failed');
+            toast(`Instance #${id} stop signal sent`, 'ok');
+            loadInstances();
+        } catch (e) {
+            toast('Stop failed: ' + e.message, 'err');
+        }
+    }
+
+    async function restartInstance(id) {
+        if (!confirm(`Restart instance #${id}? This sends a stop/start cycle.`)) return;
+        try {
+            const r = await fetch(`/api/admin/vast/instances/${id}/restart`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) throw new Error(d.error || 'Restart failed');
+            toast(`Instance #${id} restart signal sent`, 'ok');
+            loadInstances();
+        } catch (e) {
+            toast('Restart failed: ' + e.message, 'err');
+        }
+    }
+
+    async function redeployInstance(id, sshHost, sshPort) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Deploying...';
+        try {
+            const r = await fetch(`/api/admin/vast/instances/${id}/redeploy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ ssh_host: sshHost, ssh_port: sshPort }),
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) throw new Error(d.error || 'Redeploy failed');
+            toast('Code deployed and Aion restarted', 'ok');
+        } catch (e) {
+            toast('Redeploy failed: ' + e.message, 'err');
+        }
+        btn.disabled = false;
+        btn.textContent = 'Redeploy Code';
+    }
+
+    function esc(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function refreshAll() {
+        loadUsers();
+        loadInstances();
+        loadOpsConfig();
+    }
+
+    document.getElementById('modal-overlay').addEventListener('click', e => {
+        if (e.target === document.getElementById('modal-overlay')) closeModal();
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+    document.getElementById('f-gpu-name').addEventListener('keypress', e => { if (e.key === 'Enter') searchOffers(); });
+
+    (async () => {
+        if (!await checkAdmin()) return;
+        await Promise.all([checkApiStatus(), loadUsers(), loadInstances(), loadOpsConfig()]);
+        searchOffers();
+    })();
+</script>
+</body>
+</html>
