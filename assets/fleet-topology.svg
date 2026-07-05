@@ -41,8 +41,8 @@
 <circle cx="484" cy="288" r="5" fill="#3fb950"/>
 <text x="545" y="298" fill="#f0f6fc" font-size="13" font-weight="600" text-anchor="middle">wsl (local)</text>
 <text x="545" y="314" fill="#8b949e" font-size="10" text-anchor="middle">127.0.0.1</text>
-<rect x="470" y="384" width="150" height="52" rx="9" fill="#1c2740" stroke="#f85149" stroke-width="2"/>
-<circle cx="484" cy="398" r="5" fill="#f85149"/>
+<rect x="470" y="384" width="150" height="52" rx="9" fill="#1c2740" stroke="#3fb950" stroke-width="2"/>
+<circle cx="484" cy="398" r="5" fill="#3fb950"/>
 <text x="545" y="408" fill="#f0f6fc" font-size="13" font-weight="600" text-anchor="middle">draydev</text>
 <text x="545" y="424" fill="#8b949e" font-size="10" text-anchor="middle">192.168.0.200</text>
 <rect x="470" y="494" width="150" height="52" rx="9" fill="#1c2740" stroke="#3fb950" stroke-width="2"/>

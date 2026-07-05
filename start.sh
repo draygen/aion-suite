@@ -66,6 +66,10 @@ GW_HEALTH="http://127.0.0.1:5100/health"
 if curl -sf --max-time 3 "$GW_HEALTH" >/dev/null 2>&1; then
   ok "fleet-gateway already up"
 elif [ -f "$MCPBUILDER/dist/fleet-gateway.js" ] && command -v node >/dev/null 2>&1; then
+  # Load mcpbuilder's git-ignored .env so the gateway inherits the fleet/SSH
+  # secrets (KALI_/FLEET_* — draydev, ec2). Claude Desktop injects these when it
+  # spawns the MCP server; the standalone gateway needs them loaded here.
+  if [ -f "$MCPBUILDER/.env" ]; then set -a; . "$MCPBUILDER/.env"; set +a; fi
   nohup node "$MCPBUILDER/dist/fleet-gateway.js" >"$LOG_DIR/fleet-gateway.log" 2>&1 &
   echo $! > "$GW_PID_FILE"
   for i in $(seq 1 10); do curl -sf --max-time 2 "$GW_HEALTH" >/dev/null 2>&1 && break; sleep 1; done
