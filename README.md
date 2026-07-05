@@ -43,6 +43,33 @@ it's down, the page degrades gracefully and shows machines as *unknown*. Data so
 - **fleet machines + agents** (wsl / draydev / ec2) — the fleet gateway
 - **Kali container** — the existing `/api/kali` sensor health
 
+### Fleet control from chat
+
+AION chat also *drives* the fleet via `fleet …` commands (handled in `fleet_control.py`,
+routed to the gateway). Read is immediate; anything that executes on a machine is staged
+and needs an explicit `fleet yes`:
+
+```
+fleet status                          machine & agent health
+fleet run <machine> <agent>: <task>   e.g. fleet run draydev codex: check disk usage
+fleet review: <task>                  fan the task to codex + agy
+fleet yes | fleet cancel              confirm / discard a staged run
+```
+
+Guardrails: staged confirmation, localhost-only gateway, an on/off flag
+(`fleet_control_enabled`), and an optional shared token (`FLEET_GATEWAY_TOKEN`) required on
+gateway writes. Text that merely starts with "fleet" but isn't a command falls through to
+normal chat.
+
+### LLM tuning
+
+`aion-producer` (Mistral 7B) is tuned in `config.py` (`llm_options` + `llm_keep_alive`) to
+balance latency and accuracy: `temperature 0.4` for deterministic recall, `num_predict 1024`
+to bound worst-case latency, `num_ctx 8192` (model default) so injected memory isn't
+truncated, and `keep_alive 30m` to keep the model resident — which removes the ~2.7s
+cold-reload spike that otherwise hit the first message after an idle gap (warm responses are
+sub-second). The intelligence test suite still passes 16/16 after tuning.
+
 ## Usage
 
 ```bash

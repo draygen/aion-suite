@@ -62,13 +62,23 @@ def _ollama_chat(messages: list) -> str:
     for base_url in ollama_base_urls():
         attempted.append(base_url)
         try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": False,
+                # Keep the model resident so idle gaps don't trigger a multi-second
+                # reload on the next request (the biggest latency outlier).
+                "keep_alive": CONFIG.get("llm_keep_alive", "30m"),
+            }
+            options = CONFIG.get("llm_options")
+            if options:
+                # Lower temperature + bounded num_predict trade a little verbosity
+                # for faster, more deterministic answers; num_ctx stays at the
+                # model default so injected memory isn't truncated.
+                payload["options"] = options
             resp = requests.post(
                 f"{base_url}/api/chat",
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "stream": False,
-                },
+                json=payload,
                 timeout=120,
             )
             resp.raise_for_status()

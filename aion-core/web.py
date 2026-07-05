@@ -43,6 +43,7 @@ from profile_builder import get_profile_summary, build_profile_summary, invalida
 from tools import available_tool_status, dispatch_tool_message, handle_ops_command
 from kali_routes import kali_bp
 from fleet_topology import fleet_bp
+from fleet_control import handle_fleet_command
 
 app = Flask(__name__)
 logger = get_logger("web")
@@ -1466,6 +1467,21 @@ def chat():
 
         if "response" not in locals() and _is_system_prompt_query(user_message):
             response = _system_prompt_summary(username)
+            sanitize_response = False
+        elif "response" not in locals() and (fleet_reply := handle_fleet_command(user_message, client_ip)) is not None:
+            # Fleet control hook: `fleet …` commands drive mcpbuilder via the
+            # gateway (status is immediate; run/review require `fleet yes`).
+            log_event(
+                user_id=user_id,
+                session_id=envelope["session_id"],
+                channel=envelope["channel"],
+                thread_id=envelope["thread_id"],
+                message_id=envelope["request_message_id"],
+                event_type="fleet_control",
+                source="fleet_control",
+                content=user_message,
+            )
+            response = fleet_reply
             sanitize_response = False
         elif "response" not in locals() and tool_execution:
             log_event(

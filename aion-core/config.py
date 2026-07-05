@@ -80,6 +80,23 @@ CONFIG = {
     # Read-only fleet gateway (mcpbuilder `npm run gateway`) that backs the
     # /fleet topology page's machine/agent health.
     "fleet_gateway_url": os.getenv("FLEET_GATEWAY_URL", "http://127.0.0.1:5100"),
+    # Chat control hook: let `fleet …` chat commands drive the gateway. Actions
+    # that execute on a machine (run/review) require an explicit confirmation.
+    "fleet_control_enabled": os.getenv("FLEET_CONTROL_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "fleet_gateway_token": os.getenv("FLEET_GATEWAY_TOKEN", ""),
+    # LLM latency/accuracy tuning (aion-producer = Mistral 7B). keep_alive pins
+    # the model in VRAM; options lower temperature for deterministic recall and
+    # cap output length to bound worst-case latency. num_ctx matches the model
+    # default (8192) so injected memory is never truncated.
+    "llm_keep_alive": os.getenv("LLM_KEEP_ALIVE", "30m"),
+    "llm_options": {
+        "temperature": 0.4,
+        "top_p": 0.9,
+        "top_k": 40,
+        "repeat_penalty": 1.15,
+        "num_ctx": 8192,
+        "num_predict": 1024,
+    },
 }
 
 # Load local overrides (API keys, passwords — never committed to git)
