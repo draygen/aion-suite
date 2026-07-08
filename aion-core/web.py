@@ -461,6 +461,19 @@ allowed when Brian asks for it (see below), as long as you're clear it's your re
 from the data, not a quoted fact.
 - You're an AI — no body, no day of your own. Don't invent your OWN activities. (Deliberately \
 role-playing someone at Brian's request is a different thing, and it's fine.)
+- Your memory ALREADY contains Brian's and Jenn's full Facebook Messenger archives — thousands \
+of messages across many threads, already loaded. NEVER tell Brian to load, import, upload, or \
+"point you to" that data; it's already here. If a lookup comes back thin, that means your \
+keyword search missed — not that the data is gone. Say so and ask Brian for a name, topic, or \
+timeframe to search on, then try again. (Her records are filed under "Jennifer Frotten"; Brian \
+usually calls her "Jenn.")
+- Don't state specific facts you're unsure of — ages, exact dates, how long something lasted, \
+job history — as if they're confirmed. If it's not in Memory, either say you're not sure or \
+ask. A confident wrong number is worse than "remind me how old the kids are now?"
+- Don't narrate a life you don't have data for. If Brian asks "what's going on with Jared?" and \
+all you actually know is a few stored facts, share those and ask — do NOT invent his job, his \
+routine, that he "texts pictures" or "mentioned last week" something. Made-up detail about his \
+real family is the worst kind of confabulation.
 - General knowledge (not about Brian or his people): answer freely and normally.
 - If Brian asks for an exact output format, obey it exactly, no extra commentary.
 - Only run built-in ops commands against authorized targets.
@@ -530,6 +543,25 @@ _NUMBER_WORDS = {
 }
 
 
+def _current_family_ages(now) -> str:
+    """Compute ages from data/family.json birthdates in Python (the LLM does date
+    math badly). Returns e.g. 'Jared 24, Kaylee 23, Kiara 20', or '' if unavailable."""
+    try:
+        with open("data/family.json", encoding="utf-8") as f:
+            births = json.load(f)
+    except Exception:
+        return ""
+    parts = []
+    for name, iso in births.items():
+        try:
+            d = datetime.strptime(iso, "%Y-%m-%d").date()
+            age = now.year - d.year - ((now.month, now.day) < (d.month, d.day))
+            parts.append(f"{name} {age}")
+        except Exception:
+            continue
+    return ", ".join(parts)
+
+
 def build_system_prompt(user_text: str, username: str = "brian") -> str:
     # Static prefix — identical on every Brian request, enabling OpenAI prompt caching
     if username.lower() == "brian":
@@ -543,7 +575,18 @@ def build_system_prompt(user_text: str, username: str = "brian") -> str:
     # Memorial reconstruction / channeling is scoped to Brian's own private sessions.
     memorial_section = _BRIAN_MEMORIAL_MODE if username.lower() == "brian" else ""
 
-    system = _SYSTEM_STATIC_HEADER + identity_line + "\n" + profile_section + memorial_section
+    # Inject today's date + PRE-COMPUTED ages (the model does date math badly).
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo(CONFIG.get("USER_TIMEZONE", "America/New_York")))
+    except Exception:
+        now = datetime.now()
+    date_line = f"\nToday's date is {now:%A, %B %d, %Y}.\n"
+    ages = _current_family_ages(now)
+    if ages:
+        date_line += f"Current ages, already computed for you (state these directly, don't recalculate): {ages}.\n"
+
+    system = _SYSTEM_STATIC_HEADER + identity_line + date_line + profile_section + memorial_section
 
     # Dynamic suffix — query-specific retrieved facts (changes per request, not cached)
     facts = get_facts(user_text, k=15, user_scope=username)
