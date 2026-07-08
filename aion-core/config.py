@@ -15,7 +15,8 @@ CONFIG = {
             "data/profile.jsonl",            # curated identity facts (highest priority)
             "data/brian_facts.jsonl",
             "data/fb_qa_pairs.jsonl",
-            "data/fb_messages_parsed.jsonl", # Brian's FB messages
+            "data/fb_style_pairs.jsonl",     # Brian-voice reply pairs from FB export (indexed)
+            "data/fb_messages_parsed.jsonl", # Brian's FB messages (verbatim, both sides of real threads)
             "data/jenn_messages.jsonl",      # Jennifer's FB messages (verbatim, with from/to/date)
         ],
     },
@@ -23,7 +24,8 @@ CONFIG = {
         "data/profile.jsonl",            # curated identity facts (highest priority)
         "data/brian_facts.jsonl",
         "data/fb_qa_pairs.jsonl",
-        "data/fb_messages_parsed.jsonl", # Brian's FB messages
+        "data/fb_style_pairs.jsonl",     # Brian-voice reply pairs from FB export (indexed)
+        "data/fb_messages_parsed.jsonl", # Brian's FB messages (verbatim, both sides of real threads)
         "data/jenn_messages.jsonl",      # Jennifer's FB messages (verbatim, with from/to/date)
     ],
     "openai_api_key": "",
@@ -67,8 +69,10 @@ CONFIG = {
         "::1",
     ],
     "network_ops_enabled": True,
-    "TTS_ENABLED": False,
-    "VOICE_MODE": False,
+    # Voice/TTS is OFF by default — synthesizing audio costs a network/synthesis
+    # round-trip per reply. Opt in with TTS_ENABLED=1 (or the CLI `/tts` toggle).
+    "TTS_ENABLED": os.getenv("TTS_ENABLED", "0").lower() in ("1", "true", "on"),
+    "VOICE_MODE": os.getenv("VOICE_MODE", "0").lower() in ("1", "true", "on"),
     "whisper_model": "base",
     # Memory / Goals (Phase 1 — Sapphire port)
     "EMBEDDING_PROVIDER": "null",   # null | local | api
@@ -95,10 +99,19 @@ CONFIG = {
     # it is silently ignored by non-thinking models (e.g. mistral:7b-instruct).
     "llm_think": os.getenv("LLM_THINK", "0").lower() in ("1", "true", "on"),
     "llm_options": {
-        "temperature": 0.4,
+        # 0.7 gives AION a warmer, more human/conversational voice than the old
+        # 0.4 (which was tuned for clipped, deterministic recall). Fact grounding
+        # is enforced by the system-prompt rules + retrieval, not by low temp.
+        "temperature": 0.7,
         "top_p": 0.9,
         "top_k": 40,
         "repeat_penalty": 1.15,
+        # qwen3.5:9b's base Modelfile ships presence_penalty 1.5; at our low temp
+        # that drives runaway novel-token degeneration (dictionary-dump loops).
+        # Neutralize both penalties here so the app path is safe regardless of the
+        # model's baked-in defaults.
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
         "num_ctx": 8192,
         "num_predict": 1024,
     },

@@ -211,7 +211,7 @@ def main() -> int:
                             print("ID must be a number.")
                 continue
             elif name == "tts":
-                CONFIG["TTS_ENABLED"] = not CONFIG.get("TTS_ENABLED", True)
+                CONFIG["TTS_ENABLED"] = not CONFIG.get("TTS_ENABLED", False)
                 status = "ON" if CONFIG["TTS_ENABLED"] else "OFF"
                 print(f"Text-to-Speech is now {status}.")
                 continue
@@ -232,7 +232,7 @@ def main() -> int:
         print(f"Aion: {answer}")
         logger.debug("Answer from LLM: %s...", answer[:50])
 
-        if CONFIG.get("TTS_ENABLED", True) and answer != "(no response)":
+        if CONFIG.get("TTS_ENABLED", False) and answer != "(no response)":
             logger.debug("Calling speak() with valid answer...")
             speak(answer)
         else:

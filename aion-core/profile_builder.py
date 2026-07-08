@@ -95,8 +95,16 @@ def build_profile_summary(save: bool = True) -> str:
         print("[profile] No source facts found.")
         return ""
 
-    print(f"[profile] Building profile summary from {len(facts)} facts via GPT-4o...")
-    summary = _build_with_gpt4o(facts)
+    # GPT-4o synthesis is optional. Without an OpenAI key, fall back to the raw
+    # curated facts rather than crashing the whole chat path (backend is local
+    # Ollama; OpenAI is not required to run).
+    key = CONFIG.get("openai_api_key", "")
+    if not key or key.startswith("sk-xxxx"):
+        print(f"[profile] No OpenAI key — using {len(facts)} raw curated facts as profile.")
+        summary = "\n\n".join(facts)
+    else:
+        print(f"[profile] Building profile summary from {len(facts)} facts via GPT-4o...")
+        summary = _build_with_gpt4o(facts)
 
     if save and summary:
         os.makedirs(os.path.dirname(PROFILE_SUMMARY_PATH), exist_ok=True)
