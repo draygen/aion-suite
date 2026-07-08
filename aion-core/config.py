@@ -84,11 +84,16 @@ CONFIG = {
     # that execute on a machine (run/review) require an explicit confirmation.
     "fleet_control_enabled": os.getenv("FLEET_CONTROL_ENABLED", "1").lower() not in ("0", "false", "off"),
     "fleet_gateway_token": os.getenv("FLEET_GATEWAY_TOKEN", ""),
-    # LLM latency/accuracy tuning (aion-producer = Mistral 7B). keep_alive pins
+    # LLM latency/accuracy tuning (aion-producer now = qwen3.5:9b). keep_alive pins
     # the model in VRAM; options lower temperature for deterministic recall and
     # cap output length to bound worst-case latency. num_ctx matches the model
     # default (8192) so injected memory is never truncated.
     "llm_keep_alive": os.getenv("LLM_KEEP_ALIVE", "30m"),
+    # Primary model is now qwen3.5:9b (a reasoning model). It defaults to routing
+    # the answer into message.thinking and leaving message.content EMPTY, which
+    # AION reads. think:false disables the reasoning trace so content is filled;
+    # it is silently ignored by non-thinking models (e.g. mistral:7b-instruct).
+    "llm_think": os.getenv("LLM_THINK", "0").lower() in ("1", "true", "on"),
     "llm_options": {
         "temperature": 0.4,
         "top_p": 0.9,

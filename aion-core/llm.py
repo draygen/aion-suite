@@ -69,6 +69,10 @@ def _ollama_chat(messages: list) -> str:
                 # Keep the model resident so idle gaps don't trigger a multi-second
                 # reload on the next request (the biggest latency outlier).
                 "keep_alive": CONFIG.get("llm_keep_alive", "30m"),
+                # qwen3.5 is a reasoning model: without think:false it emits its
+                # answer into message.thinking and returns empty message.content.
+                # Ignored by non-thinking models, so it's safe to always send.
+                "think": bool(CONFIG.get("llm_think", False)),
             }
             options = CONFIG.get("llm_options")
             if options:

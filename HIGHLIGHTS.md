@@ -90,3 +90,45 @@ command — and it keeps finding things.**
 **The one-liner:** *Pointed at a live secure-file-transfer alpha, the multi-agent fleet
 confirmed what was already solid, caught what wasn't, and the fixes shipped — the second time
 in a row it earned its keep.*
+
+---
+
+## 🧠 Upgraded the brain to qwen3.5:9b — and a naive swap would have silently broken it
+
+AION's personas (`brian-mistral`, `aion-producer`) were rebuilt from a Mistral 7B base onto
+**`qwen3.5:9b`** for better grounding, keeping `mistral:7b-instruct` as the fast second opinion
+for `fleet review`. On paper a ten-minute job: copy the Modelfile, swap the `FROM` line,
+convert the template from Mistral's `[INST]/<<SYS>>` to Qwen's ChatML tags.
+
+**The trap only visible by actually testing it:** `qwen3.5:9b` is a *reasoning* model. By
+default it routes its answer into a separate `thinking` field and returns an **empty
+`content`** — which is the only field AION reads. A straight base-swap would have shipped an
+assistant that replied with **blank strings**, and every unit test that only checks "did Ollama
+respond 200" would have stayed green. Probing the raw model before wiring it in caught it; the
+fix was one guarded request flag (`think:false`, config-toggled, silently ignored by the Mistral
+path). `/no_think` in the prompt — the documented trick — turned out **not** to work for this
+variant; only the request flag did. Verified end-to-end through the real `ask_llm_chat`.
+
+**The quality payoff, measured not assumed** (`MODEL_SWAP_BENCHMARK.md`): on *"my WSL keeps
+eating RAM, how do I cap it?"* the old Mistral build confidently invented commands that don't
+exist (`wsl --set-default-memory`, `wsl config`); the qwen build correctly described the real
+mechanism (`.wslconfig`, the ~80%-of-RAM default). The cost is honest and stated: ~43 tok/s vs
+~55, and longer answers — accuracy bought with throughput.
+
+**The part that extends the panel thesis:** the same `fleet review` idea now runs on a **local**
+pair. Given one buggy `transfer()` function, `qwen3.5:9b` and `mistral:7b-instruct` — two
+*architecturally different* families — cross-audited it in parallel. Both caught the obvious
+three (missing key, negative-amount abuse, race condition), but **each also caught something the
+other missed**: qwen flagged the no-rollback partial-update and integer overflow; mistral, in
+**2.35s vs qwen's 20s**, nailed the silent-failure return contract and a style issue. Running the
+two in parallel cost 20.08s total — the second opinion was **effectively free**. Same lesson as
+the codex+agy panel, now proven on two models running on one GPU in the next room.
+
+**Why it matters:** the headline features are the fleet reviews, but this is the unglamorous
+discipline underneath them — you don't upgrade the core model on vibes. Benchmark the swap,
+catch the reasoning-model footgun before it ships, keep the old build tagged for one-command
+rollback, and let a fast, independent second model keep watch for free.
+
+**The one-liner:** *Swapping the assistant's brain to a reasoning model would have silently
+shipped blank replies — testing before wiring caught it, the benchmark proved the accuracy
+gain, and a 2.35-second local second opinion now cross-audits the primary for free.*
