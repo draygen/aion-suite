@@ -8,3 +8,6 @@ elevenlabs
 bcrypt
 numpy
 httpx
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2

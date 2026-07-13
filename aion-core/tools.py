@@ -11,6 +11,7 @@ from typing import Callable, Iterable, Optional
 from urllib.parse import urlparse
 
 from config import CONFIG
+from google_calendar import handle_calendar_message
 
 log = logging.getLogger("aion.tools")
 
@@ -42,6 +43,8 @@ class RegisteredTool:
     matcher: Callable[[str], Optional[dict]]
     executor: Callable[[dict, dict], str]
     installed: Callable[[], bool]
+    risk: str = "read"
+    schema: dict | None = None
 
 
 class ToolRegistry:
@@ -58,6 +61,8 @@ class ToolRegistry:
                 "label": tool.label,
                 "description": tool.description,
                 "installed": bool(tool.installed()),
+                "risk": tool.risk,
+                "schema": tool.schema or {},
             }
             for tool in self._tools
         ]
@@ -114,7 +119,9 @@ def _unsupported_command_help() -> str:
         "nslookup <host>, whois <host>, traceroute <host>, "
         "scan <host>, web scan <host>, ping sweep <cidr>, "
         "httpx <url>, whatweb <url>, nikto <url>, testssl <host>, "
-        "zap <url>, ffuf <url-or-host>. "
+        "zap <url>, ffuf <url-or-host>, "
+        "calendar <title> <today|tomorrow|YYYY-MM-DD|MM/DD/YYYY> at <time> "
+        "notes: <optional notes>. "
         "Kali tools (via Draydev): "
         "kali nmap <host>, kali web <url>, kali whois <host>, kali dirb <url>, kali exec <cmd>."
     )
@@ -658,8 +665,49 @@ def _osint_investigate_matcher(text: str) -> Optional[dict]:
     return None
 
 
+def _calendar_matcher(text: str) -> Optional[dict]:
+    lowered = (text or "").lower()
+    if re.search(
+        r"\b(?:about|explain|describe|workflow|setup|requirements?|configured?|behind the scenes|"
+        r"what (?:can|should|would)|how (?:do|does|would|should|can)|why)\b",
+        lowered,
+    ):
+        return None
+    if re.search(
+        r"(?ix)"
+        r"(?:"
+        r"^\s*calendar\b|"
+        r"\bgoogle\s+calendar|"
+        r"\b(?:set|add|create|schedule|book)\b.{0,80}\b(?:appointment|event|reminder|calendar)\b|"
+        r"\b(?:appointment|event|reminder)\b.{0,80}\b(?:today|tomorrow|at|on|for|"
+        r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4}|"
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|"
+        r"\bremind\s+me\b.{0,120}\b(?:today|tomorrow|at|"
+        r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4}|"
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+        r")",
+        text or "",
+    ):
+        return {"message": text}
+    return None
+
+
 def _build_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
+    registry.register(
+        RegisteredTool(
+            tool_id="google_calendar",
+            label="Google Calendar",
+            description="Create appointments and reminders on the primary Google Calendar.",
+            matcher=_calendar_matcher,
+            executor=lambda args, context: handle_calendar_message(args["message"]),
+            installed=lambda: bool(CONFIG.get("google_calendar_enabled", True)),
+            risk="personal_write",
+            schema={"message": "natural language event request"},
+        )
+    )
     # osint_investigate registered first — catches person/username/email investigations
     if CONFIG.get("kali_enabled", False):
         registry.register(
@@ -688,7 +736,7 @@ def _build_tool_registry() -> ToolRegistry:
             tool_id="kali_orchestrate",
             label="Kali orchestrator",
             description="Orchestrate a series of Kali commands using natural language.",
-            matcher=lambda text: {"user_input": re.sub(r"(?i).*(?:pentest|scan|run|perform|execute)\s+(?:a|an)?\s*", "", text)} if re.search(r"(?i)(?:pentest|scan|run|perform|execute)\s+", text) else None,
+            matcher=lambda text: {"user_input": re.sub(r"(?i).*(?:kali\s+orchestrate|pentest)\s+(?:a|an)?\s*", "", text)} if re.search(r"(?i)(?:kali\s+orchestrate|pentest)\s+", text) else None,
             executor=lambda args, context: run_kali_orchestrate(args["user_input"]),
             installed=lambda: bool(CONFIG.get("kali_enabled")),
         )

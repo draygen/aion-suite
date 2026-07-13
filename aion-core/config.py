@@ -10,23 +10,24 @@ CONFIG = {
     "embed_backend": "tfidf",  # tfidf | (legacy: ollama)
     "primary_user": "brian",
     "shared_fact_files": [],
+    # NOTE: the verbatim message archives (Brian's FB threads and Jenn's
+    # messages) are NOT loaded here anymore — they live in data/messages.db
+    # (built by build_messages_db.py) and are retrieved as grouped, Eastern-time
+    # threads via messages_store.py. Keeping them out of the curated index avoids
+    # double-loading and lets the DB serve clean threaded results.
     "user_fact_files": {
         "brian": [
             "data/profile.jsonl",            # curated identity facts (highest priority)
             "data/brian_facts.jsonl",
             "data/fb_qa_pairs.jsonl",
-            "data/fb_style_pairs.jsonl",     # Brian-voice reply pairs from FB export (indexed)
-            "data/fb_messages_parsed.jsonl", # Brian's FB messages (verbatim, both sides of real threads)
-            "data/jenn_messages.jsonl",      # Jennifer's FB messages (verbatim, with from/to/date)
+            "data/fb_style_pairs.jsonl",     # Brian-voice reply pairs from FB export
         ],
     },
     "facts_files": [
         "data/profile.jsonl",            # curated identity facts (highest priority)
         "data/brian_facts.jsonl",
         "data/fb_qa_pairs.jsonl",
-        "data/fb_style_pairs.jsonl",     # Brian-voice reply pairs from FB export (indexed)
-        "data/fb_messages_parsed.jsonl", # Brian's FB messages (verbatim, both sides of real threads)
-        "data/jenn_messages.jsonl",      # Jennifer's FB messages (verbatim, with from/to/date)
+        "data/fb_style_pairs.jsonl",     # Brian-voice reply pairs from FB export
     ],
     "openai_api_key": "",
     "mistral_api_key": "",               # set in config_local.py — enables Voxtral TTS
@@ -81,6 +82,30 @@ CONFIG = {
     "USER_TIMEZONE": "America/New_York",
     "memory_enabled": True,
     "goals_enabled": True,
+    "agent_enabled": os.getenv("AION_AGENT_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "agent_max_steps": int(os.getenv("AION_AGENT_MAX_STEPS", "6")),
+    "agent_confirm_writes": os.getenv("AION_AGENT_CONFIRM_WRITES", "1").lower() not in ("0", "false", "off"),
+    "agent_workspace_root": os.getenv("AION_AGENT_WORKSPACE_ROOT", ""),
+    "agent_test_timeout_sec": int(os.getenv("AION_AGENT_TEST_TIMEOUT_SEC", "120")),
+    "hidden_chat_authors": [
+        name.strip()
+        for name in os.getenv("AION_HIDDEN_CHAT_AUTHORS", "Bob").split(",")
+        if name.strip()
+    ],
+    # Google Calendar integration. First-time OAuth setup:
+    # 1) Save a Google OAuth desktop client JSON to google_calendar_credentials_file.
+    # 2) Run `python google_calendar.py auth` from aion-core and sign in as draygen80@gmail.com.
+    # 3) AION stores a refreshable token at google_calendar_token_file.
+    "google_calendar_enabled": os.getenv("GOOGLE_CALENDAR_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "google_calendar_user_email": os.getenv("GOOGLE_CALENDAR_USER_EMAIL", "draygen80@gmail.com"),
+    "google_calendar_credentials_file": os.getenv(
+        "GOOGLE_CALENDAR_CREDENTIALS_FILE",
+        "data/google_calendar_credentials.json",
+    ),
+    "google_calendar_token_file": os.getenv("GOOGLE_CALENDAR_TOKEN_FILE", "data/google_calendar_token.json"),
+    "google_calendar_timezone": os.getenv("GOOGLE_CALENDAR_TIMEZONE", os.getenv("USER_TIMEZONE", "America/New_York")),
+    "google_calendar_default_duration_minutes": int(os.getenv("GOOGLE_CALENDAR_DEFAULT_DURATION_MINUTES", "60")),
+    "google_calendar_default_reminder_minutes": [10],
     # Read-only fleet gateway (mcpbuilder `npm run gateway`) that backs the
     # /fleet topology page's machine/agent health.
     "fleet_gateway_url": os.getenv("FLEET_GATEWAY_URL", "http://127.0.0.1:5100"),
@@ -88,10 +113,9 @@ CONFIG = {
     # that execute on a machine (run/review) require an explicit confirmation.
     "fleet_control_enabled": os.getenv("FLEET_CONTROL_ENABLED", "1").lower() not in ("0", "false", "off"),
     "fleet_gateway_token": os.getenv("FLEET_GATEWAY_TOKEN", ""),
-    # LLM latency/accuracy tuning (aion-producer now = qwen3.5:9b). keep_alive pins
-    # the model in VRAM; options lower temperature for deterministic recall and
-    # cap output length to bound worst-case latency. num_ctx matches the model
-    # default (8192) so injected memory is never truncated.
+    # LLM latency/tail-length tuning. keep_alive keeps the model resident.
+    # AION favors complete, useful answers over clipped 512-token replies; use
+    # env overrides to lower these on smaller GPUs.
     "llm_keep_alive": os.getenv("LLM_KEEP_ALIVE", "30m"),
     # Primary model is now qwen3.5:9b (a reasoning model). It defaults to routing
     # the answer into message.thinking and leaving message.content EMPTY, which
@@ -112,8 +136,8 @@ CONFIG = {
         # model's baked-in defaults.
         "presence_penalty": 0.0,
         "frequency_penalty": 0.0,
-        "num_ctx": 8192,
-        "num_predict": 1024,
+        "num_ctx": int(os.getenv("LLM_NUM_CTX", "16384")),
+        "num_predict": int(os.getenv("LLM_NUM_PREDICT", "2048")),
     },
 }
 

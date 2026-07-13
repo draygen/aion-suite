@@ -84,6 +84,28 @@ Aion supports several commands:
 *   `/set k=v`: Set a runtime option (e.g., `/set model=gpt-4o-mini`).
 *   `exit` or `quit`: Exit the application.
 
+### Google Calendar Appointments
+
+AION can create appointments on Brian's primary Google Calendar, which then syncs
+to devices signed into `draygen80@gmail.com`.
+
+1.  Install dependencies from `requirements.txt`.
+2.  Create a Google Cloud OAuth desktop client with Calendar API access.
+3.  Save the downloaded client JSON as `data/google_calendar_credentials.json`.
+4.  Run:
+    ```bash
+    python google_calendar.py auth
+    ```
+5.  Sign in as `draygen80@gmail.com`. AION saves the reusable token at
+    `data/google_calendar_token.json`.
+
+Example chat commands:
+
+```text
+calendar dentist tomorrow at 2pm notes: bring insurance card
+schedule appointment doctor 2026-07-20 at 9am reminder 30 minutes before
+```
+
 ## Project Structure
 
 *   `app.py`: Main application logic, handles user input and orchestrates interactions.

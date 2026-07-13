@@ -752,6 +752,8 @@
         let globalChatJoinedNoticeShown = false;
         let availableChannels = [];
         let presencePollHandle = null;
+        let historyPollHandle = null;
+        let lastRenderedHistoryKey = '';
 
         async function checkAuth() {
             // SSO from Drayhub portal
@@ -924,14 +926,28 @@
         function formatTimestamp(value) {
             const date = value ? new Date(value) : new Date();
             if (Number.isNaN(date.getTime())) return '';
-            return date.toLocaleString([], {
-                year: 'numeric',
-                month: 'short',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-            });
+
+            // Adjust the UTC time by -5 hours (EST offset) to get EST date
+            const estOffsetMs = -5 * 60 * 60 * 1000;
+            const estDate = new Date(date.getTime() + estOffsetMs);
+
+            // Format using UTC methods to avoid local browser timezone shifts
+            const pad = (n) => String(n).padStart(2, '0');
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+            const month = months[estDate.getUTCMonth()];
+            const day = pad(estDate.getUTCDate());
+            const year = estDate.getUTCFullYear();
+
+            let hours = estDate.getUTCHours();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12;
+            hours = hours ? hours : 12; // 0 should be 12
+
+            const minutes = pad(estDate.getUTCMinutes());
+            const seconds = pad(estDate.getUTCSeconds());
+
+            return `${month} ${day}, ${year}, ${hours}:${minutes}:${seconds} ${ampm} EST`;
         }
 
         function addMessage(text, type, timestamp = null, meta = '') {
@@ -1001,13 +1017,20 @@
         }
 
         function renderChannelHistory(messages) {
+            const nextKey = (messages || [])
+                .map(msg => msg.id || msg.message_id || `${msg.ts}:${msg.author_username}:${msg.role}`)
+                .join('|');
+            if (nextKey && nextKey === lastRenderedHistoryKey) return;
+            lastRenderedHistoryKey = nextKey;
             chatContainer.innerHTML = '';
             for (const msg of messages || []) {
                 const type = msg.role === 'assistant' ? 'assistant' : 'user';
+                const author = msg.role === 'assistant' ? 'AION' : (msg.author_username || 'unknown');
+                const body = msg.role === 'assistant' ? msg.content : `${author}: ${msg.content}`;
                 const label = msg.role === 'assistant'
                     ? `#${msg.channel}/${msg.thread_id}`
                     : `${msg.author_username || 'unknown'} · #${msg.channel}/${msg.thread_id}`;
-                addMessage(msg.content, type, msg.ts, label);
+                addMessage(body, type, msg.ts, label);
             }
         }
 
@@ -1065,12 +1088,20 @@
             }, 8000);
         }
 
-        async function loadChannelHistory(channelName) {
+        function startHistoryPolling() {
+            if (historyPollHandle) clearInterval(historyPollHandle);
+            historyPollHandle = setInterval(() => {
+                loadChannelHistory(activeChatSession.channel, { refreshSidebars: false }).catch(() => {});
+            }, 2500);
+        }
+
+        async function loadChannelHistory(channelName, options = {}) {
+            const refreshSidebars = options.refreshSidebars !== false;
             const r = await fetch(`/api/channels/${encodeURIComponent(channelName)}/history`, { credentials: 'include' });
             const data = await r.json();
             if (!r.ok) throw new Error(data.error || 'Failed to load channel history.');
             renderChannelHistory(data.messages || []);
-            await refreshPresenceAndActivity(channelName);
+            if (refreshSidebars) await refreshPresenceAndActivity(channelName);
         }
 
         async function switchChannel(channelName) {
@@ -1114,6 +1145,7 @@
             await loadChannelHistory(activeChatSession.channel);
             announceGlobalChat(username);
             startPresencePolling();
+            startHistoryPolling();
             messageInput.focus();
         }
 
@@ -1417,7 +1449,7 @@
                     convEl.className = 'mem-conv';
                     convEl.dataset.name = (conv.display || '').toLowerCase();
 
-                    const d1 = fmtDate(conv.ts_start), d2 = fmtDate(conv.ts_end);
+                    const d1 = fmtDate(conv.first_date), d2 = fmtDate(conv.last_date);
                     const dateRange = d1 === d2 ? d1 : `${d1} – ${d2}`;
 
                     convEl.innerHTML = `

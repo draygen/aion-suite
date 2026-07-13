@@ -125,6 +125,7 @@ class TestBrain(unittest.TestCase):
         memory.append({"input": "fact1", "output": "output1"})
         memory.append({"input": "fact2", "output": "output2"})
         memory.append({"input": "fact3", "output": "output3"})
+        brain._index_memory = list(memory)
 
         # Create mock vectorizer and matrix
         mock_vectorizer = MagicMock()
@@ -171,6 +172,50 @@ class TestBrain(unittest.TestCase):
         facts = get_facts("green", user_scope="alice", k=2)
         self.assertEqual(facts, ["Q: favorite color A: green"])
         mock_load_fact_records.assert_called_once_with(brain._default_files_for_user("alice"))
+
+    def test_parse_date_from_query(self):
+        from brain import _parse_date_from_query
+        self.assertEqual(_parse_date_from_query("Jenn's messages on January 15th, 2016"), "2016-01-15")
+        self.assertEqual(_parse_date_from_query("messages on 2016-01-15"), "2016-01-15")
+        self.assertEqual(_parse_date_from_query("chat log from 1/15/16"), "2016-01-15")
+        self.assertEqual(_parse_date_from_query("what did she say on Jan 15, 2016?"), "2016-01-15")
+
+    def test_get_facts_retrieves_verbatim_messages_for_date(self):
+        # Verbatim messages now come from messages.db via messages_store. Build a
+        # throwaway DB and point the store at it, then verify get_facts surfaces
+        # the message as a grouped, Eastern-time thread block.
+        import os
+        import tempfile
+        import build_messages_db
+        import messages_store
+
+        rows = [{
+            "source": "jenn", "thread_id": "222",
+            "thread_display": "Jennifer Frotten ↔ Hayley Carey",
+            "sender": "Jennifer Frotten", "recipient": "Hayley Carey",
+            "ts_utc": 1452890494000, "date_est": "2016-01-15",
+            "time_est": "03:41 PM EST",
+            "body": "For two weeks or like 10 days",
+            "post_death": 0, "participants": "[]",
+        }]
+        fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        build_messages_db.create_db(db_path, rows)
+        orig = messages_store.DB_PATH
+        messages_store.DB_PATH = db_path
+        messages_store._NAME_TOKENS_CACHE = None
+        brain._FACTS_RESULT_CACHE.clear()
+        try:
+            facts = get_facts("messages from January 15th, 2016")
+            joined = "\n".join(facts)
+            self.assertIn("For two weeks or like 10 days", joined)
+            self.assertIn("[2016-01-15 03:41 PM EST]", joined)
+            self.assertIn("Jennifer Frotten → Hayley Carey:", joined)
+        finally:
+            messages_store.DB_PATH = orig
+            messages_store._NAME_TOKENS_CACHE = None
+            brain._FACTS_RESULT_CACHE.clear()
+            os.remove(db_path)
 
 if __name__ == '__main__':
     unittest.main()

@@ -76,14 +76,13 @@ def _ollama_chat(messages: list) -> str:
             }
             options = CONFIG.get("llm_options")
             if options:
-                # Lower temperature + bounded num_predict trade a little verbosity
-                # for faster, more deterministic answers; num_ctx stays at the
-                # model default so injected memory isn't truncated.
+                # App-level options override the Modelfile so response length and
+                # context window can be tuned without rebuilding the model.
                 payload["options"] = options
             resp = requests.post(
                 f"{base_url}/api/chat",
                 json=payload,
-                timeout=120,
+                timeout=300,
             )
             resp.raise_for_status()
             return resp.json()["message"]["content"]

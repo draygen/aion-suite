@@ -9,6 +9,9 @@ bcrypt
 pytest
 numpy
 httpx
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
 onnxruntime-gpu
 transformers
 huggingface_hub

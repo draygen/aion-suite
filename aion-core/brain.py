@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import pickle
+import re
 import threading
 import time
 from typing import List, Dict, Any, Optional, Tuple
@@ -26,6 +27,9 @@ _tfidf_matrix = None
 # OpenAI embedding cache
 _embed_vectors = None  # np.ndarray shape (N, dims) once built
 _EMBED_CACHE_PATH = "data/embeddings_cache.pkl"
+
+# Set of known thread names from Facebook messages, populated on load_facts()
+_KNOWN_THREADS = set()
 
 # Query-level caches (avoids repeat embeddings API calls)
 _QUERY_VECTOR_CACHE: Dict[str, Any] = {}          # query_hash → np.ndarray
@@ -269,7 +273,7 @@ def _rebuild_index_memory() -> None:
 
 def load_facts(files: List[str] = None, user_scope: Optional[str] = None) -> int:
     """Load facts into memory. Returns count loaded into active retrieval memory."""
-    global memory, _tfidf_vectorizer, _tfidf_matrix, _embed_vectors
+    global memory, _tfidf_vectorizer, _tfidf_matrix, _embed_vectors, _KNOWN_THREADS
     memory.clear()
     _tfidf_vectorizer = None
     _tfidf_matrix = None
@@ -280,6 +284,16 @@ def load_facts(files: List[str] = None, user_scope: Optional[str] = None) -> int
 
     memory.extend(_load_fact_records(files))
     _rebuild_index_memory()
+
+    # Populate known threads for verbatim message filtering
+    _KNOWN_THREADS.clear()
+    for fact in memory:
+        thread = fact.get("thread")
+        if thread:
+            _KNOWN_THREADS.add(thread.lower().strip())
+            for tok in thread.lower().split():
+                if len(tok) > 2:
+                    _KNOWN_THREADS.add(tok)
 
     # Pre-warm TF-IDF in background so first request doesn't stall.
     threading.Thread(target=_ensure_tfidf, daemon=True, name="tfidf-warmup").start()
@@ -393,7 +407,7 @@ def _format_snippet(fact: Dict[str, Any], max_len: int = 280) -> str:
     s = s.replace("\r", " ").replace("\n", " ")
     if len(s) > max_len:
         s = s[: max_len - 3] + "..."
-    return s
+    return _convert_utc_to_est_in_text(s)
 
 
 def _query_hash(input_str: str, k: int, user_scope: Optional[str]) -> str:
@@ -401,36 +415,177 @@ def _query_hash(input_str: str, k: int, user_scope: Optional[str]) -> str:
     return hashlib.md5(key.encode("utf-8")).hexdigest()
 
 
-def get_facts(input_str: str, k: int = 12, user_scope: Optional[str] = None) -> List[str]:
-    """Return up to k relevant snippets. Prefer OpenAI embeddings, then TF-IDF, then lexical.
+_MONTHS_MAP = {
+    "january": 1, "jan": 1,
+    "february": 2, "feb": 2,
+    "march": 3, "mar": 3,
+    "april": 4, "apr": 4,
+    "may": 5,
+    "june": 6, "jun": 6,
+    "july": 7, "jul": 7,
+    "august": 8, "aug": 8,
+    "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10,
+    "november": 11, "nov": 11,
+    "december": 12, "dec": 12
+}
 
-    Results are cached in memory for _FACTS_CACHE_TTL seconds to avoid redundant
-    embedding API calls for identical or near-identical queries.
-    """
-    # Check full-result cache first
-    cache_key = _query_hash(input_str, k, user_scope)
-    cached = _FACTS_RESULT_CACHE.get(cache_key)
-    if cached is not None:
-        results, ts = cached
-        if time.time() - ts < _FACTS_CACHE_TTL:
-            return results
-        del _FACTS_RESULT_CACHE[cache_key]
 
-    normalized_scope = _normalize_user_scope(user_scope)
-    use_global_cache = not normalized_scope or normalized_scope == _primary_user()
-    fact_pool = memory if use_global_cache else _load_fact_records(_default_files_for_user(normalized_scope))
+def _parse_date_from_query(text: str) -> Optional[str]:
+    import re
+    text = text.lower().strip()
 
-    # Keep the curated TF-IDF pool aligned with in-memory facts when callers mutate
-    # `memory` directly in tests or ad hoc scripts.
-    if use_global_cache and memory:
-        curated_count = sum(
-            1
-            for fact in memory
-            if (fact.get("_meta") or {}).get("source_type", "imported_fact") in _INDEX_SOURCE_TYPES
+    # 1. Look for YYYY-MM-DD
+    match = re.search(r'\b(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])\b', text)
+    if match:
+        year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    # 2. Look for MM/DD/YYYY or MM/DD/YY
+    match = re.search(r'\b(0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])[-/](20\d{2}|\d{2})\b', text)
+    if match:
+        month, day, year_val = int(match.group(1)), int(match.group(2)), match.group(3)
+        if len(year_val) == 2:
+            year = 2000 + int(year_val)
+        else:
+            year = int(year_val)
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    # 3. Look for Month Name followed by Day, Year (optional)
+    month_pattern = "|".join(_MONTHS_MAP.keys())
+    match = re.search(rf'\b({month_pattern})\b\s*(?:the\s+)?(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b(?:\s*,\s*|\s+)?\b(20\d{2}|\d{2})?\b', text)
+    if match:
+        m_name = match.group(1)
+        month = _MONTHS_MAP[m_name]
+        day = int(match.group(2))
+        year_val = match.group(3)
+        if year_val:
+            if len(year_val) == 2:
+                year = 2000 + int(year_val)
+            else:
+                year = int(year_val)
+        else:
+            year = 2016  # fallback to 2016 for Jenn's messages if year is omitted
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    # 4. Look for Day followed by Month Name, Year
+    match = re.search(rf'\b(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b\s*(?:of\s+)?\b({month_pattern})\b(?:\s*,\s*|\s+)?\b(20\d{2}|\d{2})?\b', text)
+    if match:
+        day = int(match.group(1))
+        m_name = match.group(2)
+        month = _MONTHS_MAP[m_name]
+        year_val = match.group(3)
+        if year_val:
+            if len(year_val) == 2:
+                year = 2000 + int(year_val)
+            else:
+                year = int(year_val)
+        else:
+            year = 2016
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    return None
+
+
+def _convert_utc_to_est_in_text(text: str) -> str:
+    """Rewrite any `[YYYY-MM-DD HH:MM UTC]` stamps a model emits into local
+    US/Eastern with AM/PM (DST-aware). Applied to snippets and chat responses."""
+    import re
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    pattern = r'\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) UTC\]'
+    eastern = ZoneInfo("America/New_York")
+
+    def replace_match(match):
+        date_str, time_str = match.group(1), match.group(2)
+        try:
+            dt_utc = datetime.strptime(
+                f"{date_str} {time_str}", "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=timezone.utc)
+            dt_est = dt_utc.astimezone(eastern)
+            return dt_est.strftime("[%Y-%m-%d %I:%M %p %Z]")
+        except Exception:
+            return match.group(0)
+
+    return re.sub(pattern, replace_match, text)
+
+
+def _extract_name_hint(input_str: str) -> Optional[str]:
+    """Detect a contact/thread name hint in a query (routes the search to a
+    person/thread rather than the message body)."""
+    try:
+        import messages_store
+        known = messages_store.known_name_tokens()
+    except Exception:
+        return None
+    import re
+    for w in re.findall(r"[a-zA-Z]{3,}", (input_str or "").lower()):
+        if w in known:
+            return w
+    return None
+
+
+def _strip_routing_tokens(text: str, name: Optional[str]) -> str:
+    """Remove name + date tokens so the remainder is just the topical body
+    query (if any)."""
+    residual = text or ""
+    if name:
+        residual = re.sub(re.escape(name), " ", residual, flags=re.IGNORECASE)
+    month_pat = r"\b(" + "|".join(_MONTHS_MAP.keys()) + r")\b"
+    residual = re.sub(r"\b\d{1,4}([-/]\d{1,4}){1,2}\b", " ", residual)  # numeric dates
+    residual = re.sub(r"\b20\d{2}\b", " ", residual)                     # years
+    residual = re.sub(r"\b\d{1,2}(st|nd|rd|th)?\b", " ", residual, flags=re.IGNORECASE)
+    residual = re.sub(month_pat, " ", residual, flags=re.IGNORECASE)
+    return residual
+
+
+def _get_verbatim_messages(input_str: str, fact_pool: List[Dict[str, Any]] = None,
+                           k: int = 15) -> List[str]:
+    """Retrieve real message logs from messages.db as grouped, chronological,
+    Eastern-time thread blocks. Routes by date and/or contact name; otherwise
+    full-text searches the message bodies."""
+    try:
+        import messages_store
+    except Exception as e:
+        logger.warning("messages_store unavailable: %s", e)
+        return []
+    if not messages_store.db_exists():
+        return []
+
+    date_str = _parse_date_from_query(input_str)
+    name = _extract_name_hint(input_str)
+
+    # A routing query (specific date or contact) returns fuller threads; a pure
+    # topic query searches bodies and returns tighter, ranked matches.
+    routing = bool(date_str or name)
+    if routing:
+        # Only add a body filter when there are clear content terms left after
+        # removing the routing tokens (name + date words) — otherwise a query
+        # like "messages from January 15th, 2016" would wrongly require the body
+        # to contain "january"/"2016" and match nothing.
+        residual = _strip_routing_tokens(input_str, name)
+        content_query = residual if messages_store._fts_query(residual) else None
+        max_threads, max_per_thread = 6, 40
+    else:
+        content_query = input_str
+        max_threads, max_per_thread = 5, 12
+
+    try:
+        return messages_store.search_threads(
+            query=content_query,
+            on_date=date_str,
+            name=name,
+            max_threads=max_threads,
+            max_per_thread=max_per_thread,
         )
-        if curated_count != len(_index_memory):
-            _rebuild_index_memory()
+    except Exception as e:
+        logger.warning("messages_store search failed: %s", e)
+        return []
 
+
+def _get_curated_facts(input_str: str, fact_pool: List[Dict[str, Any]], use_global_cache: bool, k: int = 12) -> List[str]:
+    """Helper to retrieve curated facts (TF-IDF or OpenAI embeddings over curated index)."""
     # Path 1: OpenAI semantic embeddings
     if use_global_cache and CONFIG.get("embed_backend") == "openai":
         _ensure_openai_embeddings()
@@ -460,7 +615,10 @@ def get_facts(input_str: str, k: int = 12, user_scope: Optional[str] = None) -> 
                 for idx, score in ranked[: k * 3]:
                     if score < 0.1:
                         continue
-                    snip = _format_snippet(memory[idx])
+                    fact = memory[idx]
+                    if (fact.get("_meta") or {}).get("source_type", "imported_fact") not in _INDEX_SOURCE_TYPES:
+                        continue
+                    snip = _format_snippet(fact)
                     if not snip or snip in seen:
                         continue
                     seen.add(snip)
@@ -468,7 +626,6 @@ def get_facts(input_str: str, k: int = 12, user_scope: Optional[str] = None) -> 
                     if len(results) >= k:
                         break
                 if results:
-                    _FACTS_RESULT_CACHE[cache_key] = (results, time.time())
                     return results
             except Exception as e:
                 logger.warning("OpenAI embedding query failed, falling back: %s", e)
@@ -507,24 +664,95 @@ def get_facts(input_str: str, k: int = 12, user_scope: Optional[str] = None) -> 
                 if len(results) >= k:
                     break
             if results:
-                _FACTS_RESULT_CACHE[cache_key] = (results, time.time())
                 return results
         except Exception as e:
             logger.warning("TF-IDF query failed, falling back to lexical: %s", e)
 
-    if not fact_pool:
+    # Lexical fallback restricted to curated index
+    pool = _index_memory if use_global_cache else [
+        f for f in fact_pool
+        if (f.get("_meta") or {}).get("source_type", "imported_fact") in _INDEX_SOURCE_TYPES
+    ]
+    if not pool:
         return []
     scored = []
-    for fact in fact_pool:
+    for fact in pool:
         source = fact.get("input") or fact.get("output") or ""
         out = fact.get("output") or fact.get("input") or ""
         if not out:
             continue
         scored.append((_score(input_str, source + " " + out), _format_snippet(fact)))
     scored.sort(key=lambda t: t[0], reverse=True)
-    results = [snip for score, snip in scored[:k] if score > 0]
-    if results:
-        _FACTS_RESULT_CACHE[cache_key] = (results, time.time())
+    return [snip for score, snip in scored[:k] if score > 0]
+
+
+def get_facts(input_str: str, k: int = 12, user_scope: Optional[str] = None) -> List[str]:
+    """Return up to k relevant snippets. Prefer OpenAI embeddings, then TF-IDF, then lexical.
+
+    Results are cached in memory for _FACTS_CACHE_TTL seconds to avoid redundant
+    embedding API calls for identical or near-identical queries.
+    """
+    # Check full-result cache first
+    cache_key = _query_hash(input_str, k, user_scope)
+    cached = _FACTS_RESULT_CACHE.get(cache_key)
+    if cached is not None:
+        results, ts = cached
+        if time.time() - ts < _FACTS_CACHE_TTL:
+            return results
+        del _FACTS_RESULT_CACHE[cache_key]
+
+    normalized_scope = _normalize_user_scope(user_scope)
+    use_global_cache = not normalized_scope or normalized_scope == _primary_user()
+    fact_pool = memory if use_global_cache else _load_fact_records(_default_files_for_user(normalized_scope))
+
+    # Keep the curated TF-IDF pool aligned with in-memory facts when callers mutate
+    # `memory` directly in tests or ad hoc scripts.
+    if use_global_cache and memory:
+        curated_count = sum(
+            1
+            for fact in memory
+            if (fact.get("_meta") or {}).get("source_type", "imported_fact") in _INDEX_SOURCE_TYPES
+        )
+        if curated_count != len(_index_memory):
+            _rebuild_index_memory()
+
+    # Determine if this is a query looking for message archives.
+    msg_keywords = {"message", "messages", "messenger", "chat", "chats", "chatting",
+                    "text", "texts", "texting", "thread", "threads", "conversation",
+                    "conversations", "verbatim", "said", "say", "wrote", "write",
+                    "facebook", "talk", "talked", "talking", "messaged", "messaging",
+                    "dm", "dms", "told", "tell", "discuss", "discussed"}
+    date_str = _parse_date_from_query(input_str)
+    lowered = input_str.lower()
+    name_hint = _extract_name_hint(input_str)
+    # "who is/was X" style questions want curated identity facts, not message logs.
+    identity_intent = bool(re.match(r"\s*(who\s+(is|was|are|were)\b|who's\b)", lowered))
+
+    is_message_query = (
+        not identity_intent
+        and (date_str is not None
+             or bool(name_hint)
+             or any(kw in lowered for kw in msg_keywords))
+    )
+
+    # Get curated context facts
+    curated_results = _get_curated_facts(input_str, fact_pool, use_global_cache, k=k)
+
+    # Get verbatim messages if requested. Gated to the primary user: the message
+    # archive is Brian's/Jenn's private data and must not leak into other users'
+    # scoped retrieval.
+    verbatim_results = []
+    if is_message_query and use_global_cache:
+        verbatim_results = _get_verbatim_messages(input_str, fact_pool, k=15)
+
+    if verbatim_results:
+        # For a message query, lead with the actual message threads, then add a
+        # few curated facts for grounding (who people are, dates, family).
+        results = verbatim_results + curated_results[:3]
+    else:
+        results = curated_results[:k]
+
+    _FACTS_RESULT_CACHE[cache_key] = (results, time.time())
     return results
 
 

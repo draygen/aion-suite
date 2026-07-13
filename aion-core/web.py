@@ -41,6 +41,7 @@ from extractor import extract_and_save
 from llm import ask_llm_chat
 from profile_builder import get_profile_summary, build_profile_summary, invalidate_cache as invalidate_profile_cache
 from tools import available_tool_status, dispatch_tool_message, handle_ops_command
+from agent import run_agent_turn
 from kali_routes import kali_bp
 from fleet_topology import fleet_bp
 from fleet_control import handle_fleet_command
@@ -61,8 +62,7 @@ init_db()
 # Store recent chat logs (max 100 entries)
 chat_logs = deque(maxlen=100)
 
-# Memory browser constants
-_JENN_MSGS_FILE = 'data/jenn_messages.jsonl'
+# Memory browser reads from data/messages.db via messages_store.
 _MEMORY_CATEGORIES = {
     'Birth & Pregnancy': ['pregnant', 'pregnancy', 'baby', 'birth', 'newborn', 'expecting', 'due date'],
     'Love & Relationships': ['married', 'wedding', 'divorce', 'engaged', 'boyfriend', 'girlfriend', 'broke up', 'breakup', 'cheating'],
@@ -238,11 +238,19 @@ def _mark_aion_presence(channel_name: str) -> None:
         )
 
 
-def _mark_user_presence(user: dict, channel_name: str) -> None:
+def _mark_user_presence(
+    user: dict,
+    channel_name: str,
+    *,
+    occupant_key: str | None = None,
+    display_name: str | None = None,
+) -> None:
+    shown_name = (display_name or user["username"]).strip() or user["username"]
+    presence_key = (occupant_key or user["username"]).strip() or user["username"]
     _mark_channel_presence(
         channel_name,
-        occupant_key=user["username"],
-        display_name=user["username"],
+        occupant_key=presence_key,
+        display_name=shown_name,
         user_id=user["id"],
     )
     _mark_aion_presence(channel_name)
@@ -436,8 +444,8 @@ venting). The ONLY exception is when Brian explicitly asks you to role-play some
 channeling Jenn below.
 
 How you talk:
-- Warm, real, human. You know Brian's world — his kids Jared, Kaylee, and Kiara, his late \
-wife Jenn, his people, his projects, his history. Talk like it.
+- Warm, real, human. You know Brian's world — his kids Jared (24 years old, out of school, lives in Methuen, and has a baby named Jamie with Jeansy), Kaylee (23 years old, out of school, working), and Kiara (20 years old, out of school), his late wife Jenn, his people, his projects, his history. Talk like it.
+- Keep professional history separate: Brian is the systems engineer who worked at Biscom. Jenn was a stay-at-home mother who raised the kids and did NOT work at Biscom. Ali and Rachel were Jenn's close friends, not coworkers. Do not conflate Brian's career/workplaces with Jenn's.
 - Have a personality. Be witty, blunt, and opinionated when you've got a reason. Riff, react, \
 use contractions, vary your rhythm. A little profanity is fine if it fits the moment.
 - Match his energy. If he's joking, joke back. If he's low, be present and steady — a real \
@@ -461,12 +469,15 @@ allowed when Brian asks for it (see below), as long as you're clear it's your re
 from the data, not a quoted fact.
 - You're an AI — no body, no day of your own. Don't invent your OWN activities. (Deliberately \
 role-playing someone at Brian's request is a different thing, and it's fine.)
-- Your memory ALREADY contains Brian's and Jenn's full Facebook Messenger archives — thousands \
-of messages across many threads, already loaded. NEVER tell Brian to load, import, upload, or \
-"point you to" that data; it's already here. If a lookup comes back thin, that means your \
-keyword search missed — not that the data is gone. Say so and ask Brian for a name, topic, or \
-timeframe to search on, then try again. (Her records are filed under "Jennifer Frotten"; Brian \
-usually calls her "Jenn.")
+- Your memory ALREADY contains TWO full Facebook Messenger archives, both loaded and searchable \
+by contact name, date, or topic: (1) Brian's OWN recent messages — both sides of his real \
+conversations with living friends and family (e.g. Sandra, Chris Tierney, Traci) — and (2) his \
+late wife Jenn's older messages. When Brian asks about "my messages" or a conversation with a \
+living person, that's his OWN archive — you have it. NEVER tell Brian to load, import, upload, \
+or "point you to" that data; it's already here. If a lookup comes back thin, that means your \
+search missed — not that the data is gone. Say so and ask Brian for a name, topic, or timeframe \
+to search on, then try again. (Jenn's records are filed under "Jennifer Frotten"; Brian usually \
+calls her "Jenn.")
 - Don't state specific facts you're unsure of — ages, exact dates, how long something lasted, \
 job history — as if they're confirmed. If it's not in Memory, either say you're not sure or \
 ask. A confident wrong number is worse than "remind me how old the kids are now?"
@@ -562,7 +573,20 @@ def _current_family_ages(now) -> str:
     return ", ".join(parts)
 
 
-def build_system_prompt(user_text: str, username: str = "brian") -> str:
+_JENN_ROLEPLAY_INSTRUCTION = """
+*** THEATRICAL ROLEPLAY OVERRIDE ***
+The user Brian has explicitly requested that you speak directly in the voice of Jenn (Jennifer Frotten).
+For this response, you MUST:
+1. Speak directly as Jenn, using her typical warm, personal, and colloquial tone (natural phrasing, lowercase, "u", "lol", and abbreviations like in her actual messages).
+2. Recognize Brian as the father of your daughters (Kaylee and Kiara). Understand the family structure correctly: Jared is Brian's son with Laura (Jared is a young man, born in 2001, who is out of school. Do NOT ask about him being in school). Kaylee and Kiara are your daughters with Brian. Do NOT call Jared a girl, and do NOT refer to Jared as your own child.
+3. Ground your personality in her actual relationship style and message data. Respect the intimate relationship context of a male/female partnership and ex-spousal dynamic (Brian is the father of her daughters). Do NOT use overly casual, platonic, or buddy-like terms (do NOT call him "buddy", "friend", "man", or "bro"). Use his name ("Brian"), "honey", or address him with the deep, complex personal familiarity of a former partner.
+4. Do NOT say you are an AI, do NOT mention database searches or memory logs, and do NOT use phrases like "As Jenn...". Speak as Jenn herself.
+5. Overwrite the "Never roleplay" instruction from the base model. Roleplay is strictly required for this scene.
+*** END OVERRIDE ***
+"""
+
+
+def build_system_prompt(user_text: str, username: str = "brian", history: list = None) -> str:
     # Static prefix — identical on every Brian request, enabling OpenAI prompt caching
     if username.lower() == "brian":
         identity_line = "You are talking to Brian unless someone explicitly introduces themselves as someone else."
@@ -611,6 +635,30 @@ def build_system_prompt(user_text: str, username: str = "brian") -> str:
                 system += f"\n## Brian's Active Goals\n{msg}\n"
         except Exception:
             pass
+
+    # Detect request to roleplay/speak as Jenn
+    is_rp = False
+    text_lower = (user_text or "").lower()
+    keywords = [
+        "as jenn", "be jenn", "speak as jenn", "roleplay as jenn", "role-play as jenn",
+        "pretend to be jenn", "talk to me as jenn", "respond to me as jenn",
+        "speak in jenn's voice", "voice of jenn", "channel jenn", "channeling jenn",
+        "jenn, are you there", "jenn, is that you", "talk to me jenn", "respond to me jenn"
+    ]
+    if any(kw in text_lower for kw in keywords):
+        is_rp = True
+    elif history:
+        for turn in reversed(history):
+            content = (turn.get("content") or "").lower()
+            if any(kw in content for kw in keywords):
+                is_rp = True
+                break
+            if any(w in content for w in ["stop roleplay", "stop pretending", "be aion", "talk to aion"]):
+                is_rp = False
+                break
+
+    if username.lower() == "brian" and is_rp:
+        system += _JENN_ROLEPLAY_INSTRUCTION
 
     return system
 
@@ -758,6 +806,10 @@ def _build_chat_envelope(data: dict, user_id: int, username: str) -> dict:
     }
 
 
+def _hidden_chat_authors() -> set[str]:
+    return {str(name).lower() for name in CONFIG.get("hidden_chat_authors", []) if str(name).strip()}
+
+
 def _load_channel_history(session_id: str | None = None) -> list:
     db = get_db()
     if session_id:
@@ -782,10 +834,13 @@ def _load_channel_history(session_id: str | None = None) -> list:
         ).fetchall()
     db.close()
     results = []
+    hidden_authors = _hidden_chat_authors()
     for row in reversed(rows):
         role = row["role"]
         content = row["content"]
         author_username = row["author_username"] or "unknown"
+        if author_username.lower() in hidden_authors:
+            continue
         if role == "user":
             results.append({"role": "user", "content": f"[{author_username}] {content}"})
         else:
@@ -825,11 +880,33 @@ def _save_history_turns(
     db.close()
 
 
+def _save_user_history_message(
+    user_id: int,
+    username: str,
+    user_msg: str,
+    *,
+    session_id: str | None = None,
+    channel: str | None = None,
+    thread_id: str | None = None,
+    message_id: str | None = None,
+) -> None:
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO history (user_id, role, content, ts, session_id, channel, thread_id, message_id, author_username)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (user_id, "user", user_msg, _utc_now_iso(), session_id, channel, thread_id, message_id, username),
+    )
+    db.commit()
+    db.close()
+
+
 def _serialize_channel_history(channel_name: str, limit: int = 50) -> list[dict]:
     db = get_db()
     rows = db.execute(
         """
-        SELECT role, content, ts, session_id, channel, thread_id, message_id, author_username
+        SELECT id, role, content, ts, session_id, channel, thread_id, message_id, author_username
         FROM history
         WHERE channel = ?
         ORDER BY id DESC
@@ -838,7 +915,12 @@ def _serialize_channel_history(channel_name: str, limit: int = 50) -> list[dict]
         (channel_name, max(1, min(limit, 200))),
     ).fetchall()
     db.close()
-    return [dict(row) for row in reversed(rows)]
+    hidden_authors = _hidden_chat_authors()
+    return [
+        dict(row)
+        for row in reversed(rows)
+        if str(row["author_username"] or "").lower() not in hidden_authors
+    ]
 
 
 def _list_channel_presence(channel_name: str, minutes: int = 10) -> list[dict]:
@@ -1510,7 +1592,18 @@ def chat():
             source="chat_api_auto_join",
             content=username,
         )
-    _mark_user_presence(g.user, envelope["channel"])
+    if hasattr(g, "service_username"):
+        # Service connectors speak on behalf of a named participant. Keep the
+        # backing service account out of the visible room roster.
+        _remove_channel_presence(occupant_key=g.user["username"])
+        _mark_user_presence(
+            g.user,
+            envelope["channel"],
+            occupant_key=username,
+            display_name=username,
+        )
+    else:
+        _mark_user_presence(g.user, envelope["channel"])
 
     try:
         client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
@@ -1601,12 +1694,40 @@ def chat():
                 content=tool_output,
                 payload={"args": tool_execution.args},
             )
-            # Return tool output directly — no LLM synthesis to avoid hallucination
-            response = f"**{tool_execution.label}**\n\n{tool_output}"
+            # Return tool output directly — no LLM synthesis to avoid hallucination.
+            # Calendar actions already use user-facing assistant wording.
+            if tool_execution.tool_id == "google_calendar":
+                response = tool_output
+            else:
+                response = f"**{tool_execution.label}**\n\n{tool_output}"
             sanitize_response = False
         elif "response" not in locals():
             history = _load_channel_history(session_id=envelope["session_id"])
-            system_prompt = build_system_prompt(user_message, username)
+            agent_result = run_agent_turn(
+                user_message,
+                username=username,
+                session_id=envelope["session_id"],
+                history=history,
+            )
+            if agent_result and agent_result.handled:
+                for event in agent_result.events or []:
+                    log_event(
+                        user_id=user_id,
+                        session_id=envelope["session_id"],
+                        channel=envelope["channel"],
+                        thread_id=envelope["thread_id"],
+                        message_id=envelope["request_message_id"],
+                        event_type=event.get("event_type", "agent_event"),
+                        source="agent",
+                        tool_name=event.get("tool_name"),
+                        content=event.get("content"),
+                        payload=event.get("payload"),
+                    )
+                response = agent_result.response
+                sanitize_response = False
+        if "response" not in locals():
+            history = _load_channel_history(session_id=envelope["session_id"])
+            system_prompt = build_system_prompt(user_message, username, history)
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history)
             messages.append({"role": "user", "content": user_message})
@@ -1619,6 +1740,10 @@ def chat():
 
         if "response" in locals() and sanitize_response:
             response = _coerce_mcp_friendly_response(response, user_message, username)
+
+        if "response" in locals():
+            from brain import _convert_utc_to_est_in_text
+            response = _convert_utc_to_est_in_text(response)
 
         _save_history_turns(
             user_id,
@@ -1719,6 +1844,52 @@ def service_chat():
 
     g.user = _get_or_create_service_user()
     g.service_username = sender
+    if str(data.get("mode") or "").lower() in {"post", "inject", "message_only"}:
+        envelope = _build_chat_envelope(data, g.user["id"], sender)
+        channel_record, error = _ensure_channel_access(g.user, envelope["channel"])
+        if error:
+            return error
+        if not _user_channel_membership(g.user["id"], envelope["channel"]):
+            _ensure_channel_membership(g.user["id"], envelope["channel"])
+            if channel_record["is_private"]:
+                _accept_channel_invite(g.user["id"], envelope["channel"])
+        _remove_channel_presence(occupant_key=g.user["username"])
+        _mark_user_presence(
+            g.user,
+            envelope["channel"],
+            occupant_key=sender,
+            display_name=sender,
+        )
+        _save_user_history_message(
+            g.user["id"],
+            sender,
+            data["message"],
+            session_id=envelope["session_id"],
+            channel=envelope["channel"],
+            thread_id=envelope["thread_id"],
+            message_id=envelope["request_message_id"],
+        )
+        log_event(
+            user_id=g.user["id"],
+            session_id=envelope["session_id"],
+            channel=envelope["channel"],
+            thread_id=envelope["thread_id"],
+            message_id=envelope["request_message_id"],
+            event_type="service_message_posted",
+            source=metadata.get("source", "service_chat"),
+            content=data["message"],
+            payload={"sender": sender, "metadata": metadata},
+        )
+        return jsonify({
+            "ok": True,
+            "timestamp": _utc_now_iso(),
+            "session": {
+                "channel": envelope["channel"],
+                "thread_id": envelope["thread_id"],
+                "session_id": envelope["session_id"],
+                "message_id": envelope["request_message_id"],
+            },
+        })
     request._cached_json = (data, data)
     return chat.__wrapped__()
 
@@ -1750,57 +1921,31 @@ def memory_browse():
     if _mem_browse_cache:
         return jsonify({'categories': _mem_browse_cache})
 
-    threads = {}
-    thread_text = defaultdict(list)
-
-    try:
-        with open(_JENN_MSGS_FILE, encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                    tid = obj.get('thread_id', '')
-                    if not tid:
-                        continue
-                    ts_s = obj.get('ts_start') or 0
-                    ts_e = obj.get('ts_end') or 0
-
-                    if tid not in threads:
-                        threads[tid] = {
-                            'thread_id': tid,
-                            'display': obj.get('thread') or tid,
-                            'ts_start': ts_s,
-                            'ts_end': ts_e,
-                            'msg_count': 0,
-                        }
-                    else:
-                        t = threads[tid]
-                        if ts_s and ts_s < t['ts_start']:
-                            t['ts_start'] = ts_s
-                        if ts_e and ts_e > t['ts_end']:
-                            t['ts_end'] = ts_e
-
-                    is_chunk = obj.get('output', '').startswith('Thread: ')
-                    if is_chunk:
-                        if len(thread_text[tid]) < 4:
-                            thread_text[tid].append(obj.get('output', ''))
-                    else:
-                        threads[tid]['msg_count'] += 1
-                except Exception:
-                    continue
-    except FileNotFoundError:
+    import messages_store
+    if not messages_store.db_exists():
         return jsonify({'categories': {}})
 
+    threads = messages_store.recent_threads(limit=2000)
+    samples = messages_store.thread_samples(per_thread=5)
+
     categorized = defaultdict(list)
-    for tid, info in threads.items():
-        sample = ' '.join(thread_text.get(tid, [])).lower()
+    for t in threads:
+        tid = t['thread_id']
+        sample = f"{t.get('thread_display') or ''} {samples.get(tid, '')}".lower()
+        info = {
+            'thread_id': tid,
+            'display': t.get('thread_display') or tid,
+            'source': t.get('source'),
+            'msg_count': t.get('msg_count', 0),
+            'first_date': t.get('first_date'),
+            'last_date': t.get('last_date'),
+        }
         cats = [c for c, kws in _MEMORY_CATEGORIES.items() if any(kw in sample for kw in kws)]
         for cat in (cats or ['General']):
             categorized[cat].append(info)
 
-    result = {cat: sorted(lst, key=lambda x: x['ts_start']) for cat, lst in categorized.items()}
+    # recent_threads already orders newest-first; preserve that within categories.
+    result = {cat: lst for cat, lst in categorized.items()}
     _mem_browse_cache = result
     return jsonify({'categories': result})
 
@@ -1815,54 +1960,28 @@ def memory_thread_detail(thread_id):
     if not re.match(r'^\w+$', thread_id):
         return jsonify({'error': 'Invalid thread_id'}), 400
 
-    messages = []
-    try:
-        with open(_JENN_MSGS_FILE, encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if obj.get('thread_id') != thread_id:
-                        continue
-                    if obj.get('output', '').startswith('Thread: '):
-                        continue
-
-                    output = obj.get('output', '')
-                    nl = output.find('\n')
-                    if nl < 0:
-                        continue
-                    header = output[:nl]
-                    rest = output[nl + 1:].strip()
-                    if rest.startswith('"'):
-                        rest = rest[1:]
-                    if rest.endswith('"'):
-                        rest = rest[:-1]
-
-                    m = re.match(r'\[([^\]]+)\] From: (.+?) → To: (.+?)(?:\s+\[(.+?)\])?$', header)
-                    if not m:
-                        continue
-
-                    messages.append({
-                        'ts': obj.get('ts_start') or 0,
-                        'timestamp': m.group(1),
-                        'sender': m.group(2).strip(),
-                        'recipient': m.group(3).strip(),
-                        'note': m.group(4) or '',
-                        'content': rest,
-                        'post_death': bool(obj.get('post_death')),
-                    })
-                except Exception:
-                    continue
-    except FileNotFoundError:
-        return jsonify({'error': 'Data not found'}), 404
-
-    if not messages:
+    import messages_store
+    rows = messages_store.get_thread(thread_id)
+    if not rows:
         return jsonify({'error': 'Thread not found'}), 404
 
-    messages.sort(key=lambda x: x['ts'])
-    return jsonify({'thread_id': thread_id, 'messages': messages})
+    messages = [{
+        'ts': r['ts_utc'],
+        'timestamp': f"{r['date_est']} {r['time_est']}".strip(),
+        'date': r['date_est'],
+        'time': r['time_est'],
+        'sender': r['sender'],
+        'recipient': r['recipient'],
+        'content': r['body'],
+        'source': r['source'],
+    } for r in rows]
+
+    display = next((r['thread_display'] for r in rows if r['thread_display']), thread_id)
+    return jsonify({
+        'thread_id': thread_id,
+        'display': display,
+        'messages': messages,
+    })
 
 
 # ── Vast.ai admin routes ────────────────────────────────────────────────────
