@@ -9,6 +9,24 @@ _openai_client = None
 logger = get_logger("llm")
 
 
+class OllamaResponseError(RuntimeError):
+    """Ollama was reachable but returned a non-2xx HTTP status.
+
+    Distinct from a connection failure: the server answered, so the request
+    itself is at fault (bad payload, unknown model, template error). Callers
+    should surface this rather than treating it as an unreachable backend.
+    """
+
+    def __init__(self, base_url: str, status_code: int, model: str, body: str):
+        self.base_url = base_url
+        self.status_code = status_code
+        self.model = model
+        self.body = body
+        super().__init__(
+            f"Ollama at {base_url} returned HTTP {status_code} for model {model}: {body[:600]}"
+        )
+
+
 def _get_openai_client():
     global _openai_client
     if _openai_client is None:
@@ -34,6 +52,11 @@ def ask_llm_chat(messages: list) -> str:
     if backend == 'ollama':
         try:
             return _ollama_chat(messages)
+        except OllamaResponseError:
+            # The server was reachable and returned an error (e.g. a 400 from a
+            # bad payload). Falling back to OpenAI would just silently paper over
+            # a real request bug, so surface it instead.
+            raise
         except Exception as e:
             openai_key = CONFIG.get("openai_api_key", "")
             if openai_key and not openai_key.startswith("sk-xxxx"):
@@ -59,39 +82,43 @@ def _ollama_chat(messages: list) -> str:
     model = CONFIG.get('model', 'brian-mistral')
     attempted = []
     last_error = None
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        # Keep the model resident so idle gaps don't trigger a multi-second
+        # reload on the next request (the biggest latency outlier).
+        "keep_alive": CONFIG.get("llm_keep_alive", "30m"),
+        # qwen3.5 is a reasoning model: without think:false it emits its
+        # answer into message.thinking and returns empty message.content.
+        # Ignored by non-thinking models, so it's safe to always send.
+        "think": bool(CONFIG.get("llm_think", False)),
+    }
+    options = CONFIG.get("llm_options")
+    if options:
+        # App-level options override the Modelfile so response length and
+        # context window can be tuned without rebuilding the model.
+        payload["options"] = options
+
     for base_url in ollama_base_urls():
         attempted.append(base_url)
         try:
-            payload = {
-                "model": model,
-                "messages": messages,
-                "stream": False,
-                # Keep the model resident so idle gaps don't trigger a multi-second
-                # reload on the next request (the biggest latency outlier).
-                "keep_alive": CONFIG.get("llm_keep_alive", "30m"),
-                # qwen3.5 is a reasoning model: without think:false it emits its
-                # answer into message.thinking and returns empty message.content.
-                # Ignored by non-thinking models, so it's safe to always send.
-                "think": bool(CONFIG.get("llm_think", False)),
-            }
-            options = CONFIG.get("llm_options")
-            if options:
-                # App-level options override the Modelfile so response length and
-                # context window can be tuned without rebuilding the model.
-                payload["options"] = options
             resp = requests.post(
                 f"{base_url}/api/chat",
                 json=payload,
                 timeout=300,
             )
-            resp.raise_for_status()
-            return resp.json()["message"]["content"]
-        except requests.exceptions.ConnectionError as exc:
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            # Genuinely unreachable / slow address — try the next candidate.
             last_error = exc
             continue
-        except Exception as exc:
-            last_error = exc
-            continue
+        # The host answered. A non-2xx is a real server-side error (bad payload,
+        # unknown model, template failure) that will fail identically on every
+        # address, so surface it immediately instead of masking it behind a later
+        # address's connection error.
+        if resp.status_code >= 400:
+            raise OllamaResponseError(base_url, resp.status_code, model, resp.text.strip())
+        return resp.json()["message"]["content"]
 
     attempted_text = ", ".join(attempted) if attempted else ollama_display_target()
     raise RuntimeError(

@@ -6,6 +6,7 @@ scikit-learn
 gTTS
 elevenlabs
 bcrypt
+psycopg2-binary
 numpy
 httpx
 google-api-python-client
