@@ -50,6 +50,16 @@ try:
 except ImportError:
     _MEMORY_AVAILABLE = False
 
+# ChatGPT archive (auto-injected) and the Jenn/FB message archive (/msg command).
+try:
+    import chatgpt_store
+except Exception:
+    chatgpt_store = None
+try:
+    import messages_store
+except Exception:
+    messages_store = None
+
 # How many prior history turns to replay into context on launch.
 _REPLAY_TURNS = 16
 # Hard cap on messages sent per request (system prompt excluded) to bound ctx.
@@ -270,6 +280,14 @@ def _facts_block(user_text: str) -> str:
                 blocks.append(f"Remembered:\n{msg}")
         except Exception:
             pass
+    # Auto-recall from the ChatGPT archive (PersonaBuilder). Best-effort.
+    if chatgpt_store is not None and chatgpt_store.enabled():
+        try:
+            gpt_block = chatgpt_store.format_hits(chatgpt_store.search(user_text, final_limit=4))
+            if gpt_block:
+                blocks.append(gpt_block)
+        except Exception:
+            pass
     return "\n\n".join(blocks)
 
 
@@ -359,13 +377,53 @@ def main() -> int:
         if low in ("/exit", "exit", "/quit", "quit"):
             _depart()
         if low == "/help":
-            print("Commands: /exit, /help, /whenlast (when you were last here)\n")
+            print("Commands:\n"
+                  "  /exit                leave (logs your departure)\n"
+                  "  /whenlast            when you were last here\n"
+                  "  /msg <search terms>  search your Jenn/FB message archive\n"
+                  "  /help                this list\n")
             continue
         if low == "/whenlast":
             if last_seen:
                 print(f"AION: last saw you {_humanize_gap(gap_seconds)} ago, at {_fmt_local(last_seen)}.\n")
             else:
                 print("AION: no prior session on record.\n")
+            continue
+        if low.startswith("/msg"):
+            q = user_input[4:].strip()
+            if not q:
+                print("Usage: /msg <search terms>  (searches the Jenn/FB message archive)\n")
+                continue
+            if messages_store is None or not messages_store.db_exists():
+                print("AION: the message archive (messages.db) isn't available here.\n")
+                continue
+            blocks = messages_store.search_threads(query=q, max_threads=4, max_per_thread=8)
+            if not blocks:
+                print(f"AION: nothing in the message archive matches '{q}'.\n")
+                continue
+            # Feed the real threads to AION and let it answer, folded into a user
+            # turn (no system role). Store a clean marker in history.
+            ctx = "\n\n".join(blocks)
+            aug = (
+                "(Message-archive threads matching the search — these are real logged "
+                f"messages; use them to answer:\n{ctx}\n)\n\n"
+                f"Brian: Walk me through these messages about \"{q}\"."
+            )
+            conversation.append({"role": "user", "content": f"/msg {q}"})
+            send = [dict(m) for m in conversation[-_CONTEXT_WINDOW:]]
+            while send and send[0]["role"] == "assistant":
+                send.pop(0)
+            send[-1]["content"] = aug
+            try:
+                answer = (ask_llm_chat(send) or "").strip() or "(no response)"
+            except Exception as exc:
+                print(f"AION (error): {exc}\n")
+                conversation.pop()
+                continue
+            print(f"AION: {answer}\n")
+            conversation.append({"role": "assistant", "content": answer})
+            store.save_turn(session_id, f"/msg {q}", answer)
+            first_turn = False
             continue
 
         # Store the raw turn (clean history), but send an augmented copy with

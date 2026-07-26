@@ -64,6 +64,17 @@ CONFIG = {
     "log_backup_count": 3,
     "memory_browser_requires_auth": True,
     "load_pending_facts": False,
+    # PersonaBuilder ChatGPT archive (aion_memory_foundry) — read-only hybrid
+    # RAG over 6k ChatGPT conversations. Blank URL derives the DSN from
+    # DATABASE_URL by swapping the db name, so no separate creds are needed.
+    "chatgpt_archive_enabled": os.getenv("CHATGPT_ARCHIVE_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "chatgpt_archive_url": os.getenv("CHATGPT_ARCHIVE_URL", ""),
+    "chatgpt_embedding_model": os.getenv("CHATGPT_EMBEDDING_MODEL", "qwen3-embedding:0.6b"),
+    # Auto-recall only fires when the turn has at least this many content words
+    # (after stripping greetings/acks/stopwords) — keeps AION from recalling on
+    # "hi"/"thanks". Vector similarity can't gate this (short greetings score
+    # HIGHER than rare-term questions), so we gate on query substance instead.
+    "chatgpt_min_content_tokens": int(os.getenv("CHATGPT_MIN_CONTENT_TOKENS", "1")),
     "authorized_network_targets": [
         "localhost",
         "127.0.0.1",
