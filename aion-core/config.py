@@ -30,6 +30,9 @@ CONFIG = {
         "data/fb_style_pairs.jsonl",     # Brian-voice reply pairs from FB export
     ],
     "openai_api_key": "",
+    "firecrawl_enabled": os.getenv("FIRECRAWL_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "firecrawl_api_key": "",             # set in config_local.py (or FIRECRAWL_API_KEY env) — enables web search/scrape
+    "firecrawl_search_limit": int(os.getenv("FIRECRAWL_SEARCH_LIMIT", "5")),
     "mistral_api_key": "",               # set in config_local.py — enables Voxtral TTS
     "voxtral_voice_id": "Paul",          # built-in Voxtral voice (Paul, Oliver, Marie, etc.)
     "elevenlabs_api_key": "",            # set in config.local.py
@@ -171,6 +174,11 @@ for _env_key in (
 ):
     if os.getenv(_env_key):
         CONFIG[_env_key] = os.getenv(_env_key)
+
+# Firecrawl key is commonly supplied via env on deploy targets that lack a
+# config_local.py (Vast.ai, containers).
+if os.getenv("FIRECRAWL_API_KEY"):
+    CONFIG["firecrawl_api_key"] = os.getenv("FIRECRAWL_API_KEY")
 
 if os.getenv("AION_SERVICE_TOKEN"):
     CONFIG["service_token"] = os.getenv("AION_SERVICE_TOKEN")

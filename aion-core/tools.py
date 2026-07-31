@@ -120,6 +120,7 @@ def _unsupported_command_help() -> str:
         "scan <host>, web scan <host>, ping sweep <cidr>, "
         "httpx <url>, whatweb <url>, nikto <url>, testssl <host>, "
         "zap <url>, ffuf <url-or-host>, "
+        "web search <query>, scrape <url>, "
         "calendar <title> <today|tomorrow|YYYY-MM-DD|MM/DD/YYYY> at <time> "
         "notes: <optional notes>. "
         "Kali tools (via Draydev): "
@@ -212,6 +213,83 @@ def run_tavily_search(query: str) -> str:
         return "\n\n".join(results) or "No results found."
     except Exception as e:
         return f"[tavily] Search failed: {str(e)}"
+
+
+_FIRECRAWL_API_BASE = "https://api.firecrawl.dev/v2"
+
+
+def _firecrawl_key() -> str:
+    return (CONFIG.get("firecrawl_api_key") or "").strip()
+
+
+def _firecrawl_post(path: str, payload: dict, timeout: int = 45) -> dict:
+    """POST to the Firecrawl v2 API. Returns parsed JSON, raises on failure."""
+    import requests
+
+    key = _firecrawl_key()
+    if not key:
+        raise RuntimeError(
+            "Firecrawl API key not configured "
+            "(set firecrawl_api_key in config_local.py or the FIRECRAWL_API_KEY env var)."
+        )
+    resp = requests.post(
+        f"{_FIRECRAWL_API_BASE}{path}",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def run_firecrawl_search(query: str, limit: int | None = None) -> str:
+    """Search the web via Firecrawl; return titles, URLs, and snippets."""
+    query = (query or "").strip()
+    if not query:
+        return "[firecrawl] Empty search query."
+    limit = limit or int(CONFIG.get("firecrawl_search_limit", 5) or 5)
+    try:
+        data = _firecrawl_post("/search", {"query": query, "limit": limit})
+    except Exception as e:
+        return f"[firecrawl] Search failed: {e}"
+    payload = data.get("data") or {}
+    # v2 returns {"data": {"web": [...]}}; tolerate a bare list too.
+    results = payload.get("web") if isinstance(payload, dict) else payload
+    if not results:
+        return "No results found."
+    blocks = []
+    for res in results[:limit]:
+        title = res.get("title") or "(untitled)"
+        url = res.get("url") or ""
+        desc = (res.get("description") or res.get("snippet") or "").strip()
+        block = f"Title: {title}\nURL: {url}"
+        if desc:
+            block += f"\n{desc[:300]}"
+        blocks.append(block)
+    return "\n\n".join(blocks)
+
+
+def run_firecrawl_scrape(url: str) -> str:
+    """Scrape a single URL via Firecrawl; return clean markdown."""
+    url = (url or "").strip()
+    if not url:
+        return "[firecrawl] No URL provided."
+    if "://" not in url:
+        url = f"https://{url}"
+    try:
+        data = _firecrawl_post(
+            "/scrape", {"url": url, "formats": ["markdown"], "onlyMainContent": True}
+        )
+    except Exception as e:
+        return f"[firecrawl] Scrape failed: {e}"
+    payload = data.get("data") or {}
+    markdown = (payload.get("markdown") or "").strip()
+    if not markdown:
+        return "[firecrawl] No content extracted."
+    max_chars = 6000
+    if len(markdown) > max_chars:
+        markdown = markdown[:max_chars] + "\n... (truncated)"
+    return markdown
 
 
 def run_maigret(username: str) -> str:
@@ -665,6 +743,18 @@ def _osint_investigate_matcher(text: str) -> Optional[dict]:
     return None
 
 
+def _firecrawl_search_matcher(text: str) -> Optional[dict]:
+    # Explicit web-search triggers only, so this does not swallow bare "search"
+    # (owned by tavily_search) or OSINT verbs ("who is", "look up").
+    m = re.match(
+        r"(?i)^(?:firecrawl|web\s*search|search\s+the\s+web(?:\s+for)?|search\s+online(?:\s+for)?)\s+(.+)$",
+        (text or "").strip(),
+    )
+    if m:
+        return {"query": m.group(1).strip()}
+    return None
+
+
 def _calendar_matcher(text: str) -> Optional[dict]:
     lowered = (text or "").lower()
     if re.search(
@@ -720,6 +810,33 @@ def _build_tool_registry() -> ToolRegistry:
                 installed=lambda: bool(CONFIG.get("kali_enabled")),
             )
         )
+    # Firecrawl web tools — registered before tavily so "web search"/"search the
+    # web" route here; bare "search" still falls through to tavily_search.
+    registry.register(
+        RegisteredTool(
+            tool_id="firecrawl_scrape",
+            label="Firecrawl Scrape",
+            description="Fetch a URL and return clean markdown via Firecrawl.",
+            matcher=_regex_match(
+                r"^(?:scrape|fetch(?:\s+page)?|grab(?:\s+page)?|read\s+(?:the\s+)?(?:page|url))\s+(\S+)$",
+                ("url",),
+            ),
+            executor=lambda args, context: run_firecrawl_scrape(args["url"]),
+            installed=lambda: bool(CONFIG.get("firecrawl_enabled", True) and _firecrawl_key()),
+            schema={"url": "page URL to scrape"},
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            tool_id="firecrawl_search",
+            label="Firecrawl Search",
+            description="Search the web via Firecrawl and return titles, URLs, and snippets.",
+            matcher=_firecrawl_search_matcher,
+            executor=lambda args, context: run_firecrawl_search(args["query"]),
+            installed=lambda: bool(CONFIG.get("firecrawl_enabled", True) and _firecrawl_key()),
+            schema={"query": "web search query"},
+        )
+    )
     # Tavily for explicit web/search queries (not osint — those go to osint_investigate)
     registry.register(
         RegisteredTool(

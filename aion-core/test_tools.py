@@ -76,6 +76,41 @@ class TestTools(unittest.TestCase):
         self.assertTrue(labels["Nmap"])
         self.assertFalse(labels["OWASP ZAP"])
 
+    @patch("tools.run_firecrawl_search", return_value="Title: X\nURL: https://x")
+    def test_routes_firecrawl_web_search(self, mock_search):
+        result = handle_ops_command("web search ollama think false", "1.2.3.4")
+        self.assertIn("Title: X", result)
+        mock_search.assert_called_once_with("ollama think false")
+
+    @patch("tools.run_firecrawl_scrape", return_value="# clean markdown")
+    def test_routes_firecrawl_scrape(self, mock_scrape):
+        result = handle_ops_command("scrape https://example.com/docs", "1.2.3.4")
+        self.assertIn("clean markdown", result)
+        mock_scrape.assert_called_once_with("https://example.com/docs")
+
+    def test_bare_search_does_not_hit_firecrawl(self):
+        # "search <query>" (no "web"/"the web") must not route to firecrawl.
+        result = dispatch_tool_message("search the quietest keyboard", "1.2.3.4")
+        self.assertNotEqual(getattr(result, "tool_id", None), "firecrawl_search")
+
+    @patch("tools._firecrawl_post", return_value={"data": {"web": [
+        {"title": "Doc", "url": "https://d", "description": "desc"}]}})
+    def test_firecrawl_search_formats_results(self, mock_post):
+        from tools import run_firecrawl_search
+        out = run_firecrawl_search("q")
+        self.assertIn("Title: Doc", out)
+        self.assertIn("https://d", out)
+
+    def test_firecrawl_reports_missing_key(self):
+        from tools import run_firecrawl_search
+        saved = CONFIG.get("firecrawl_api_key")
+        CONFIG["firecrawl_api_key"] = ""
+        try:
+            out = run_firecrawl_search("q")
+        finally:
+            CONFIG["firecrawl_api_key"] = saved
+        self.assertIn("Firecrawl API key not configured", out)
+
     def test_returns_none_when_disabled(self):
         CONFIG["network_ops_enabled"] = False
         self.assertIsNone(handle_ops_command("ping app.example.com", "1.2.3.4"))
