@@ -56,6 +56,11 @@ CONFIG = {
     "hermes_enabled": os.getenv("HERMES_ENABLED", "1").lower() not in ("0", "false", "off"),
     "hermes_adapter_url": os.getenv("HERMES_ADAPTER_URL", "http://127.0.0.1:8722"),
     "hermes_default_timeout": int(os.getenv("HERMES_DEFAULT_TIMEOUT", "600")),
+    # Toolsets handed to the worker per task. Includes `firecrawl` so the worker
+    # can search/scrape the web mid-task via the Firecrawl MCP. NOTE: the name is
+    # `firecrawl`, NOT `mcp-firecrawl` — Hermes silently ignores the latter
+    # ("unknown --toolsets entries"). `hermes tools list` is the source of truth.
+    "hermes_toolsets": os.getenv("HERMES_TOOLSETS", "terminal,file,firecrawl"),
     "retrieval": "embed",  # embed | lexical
     "embed_backend": "tfidf",  # tfidf | (legacy: ollama)
     "primary_user": "brian",

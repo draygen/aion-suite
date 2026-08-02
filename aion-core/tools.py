@@ -420,6 +420,9 @@ def run_hermes_delegate(objective: str, *, timeout: int | None = None) -> str:
 
     timeout = int(timeout or CONFIG.get("hermes_default_timeout", 600))
     body = {"objective": objective, "timeout": timeout}
+    toolsets = [t.strip() for t in str(CONFIG.get("hermes_toolsets", "")).split(",") if t.strip()]
+    if toolsets:
+        body["allowed_tools"] = toolsets
     try:
         resp = requests.post(_hermes_url("/tasks"), json=body, timeout=10)
     except requests.RequestException as exc:
