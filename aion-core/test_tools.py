@@ -2,13 +2,16 @@ import unittest
 from unittest.mock import patch
 
 from config import CONFIG
+import tools
 from tools import (
     ToolRuntimeError,
     available_tool_status,
     dispatch_safe_diagnostic_message,
     dispatch_tool_message,
+    get_tool_registry,
     handle_ops_command,
     is_authorized_target,
+    run_hermes_delegate,
 )
 
 
@@ -164,6 +167,68 @@ class TestTools(unittest.TestCase):
     def test_returns_help_for_unsupported_command(self):
         result = handle_ops_command("run authorized check", "1.2.3.4")
         self.assertIn("Unsupported command.", result)
+
+
+class TestHermesDelegation(unittest.TestCase):
+    """AION → Hermes worker delegation. The adapter is external, so the network
+    is mocked; these lock the routing and the poll→result contract."""
+
+    def _match(self, text):
+        inv = get_tool_registry().match(text)
+        return inv.tool_id if inv else None
+
+    def test_explicit_delegation_verbs_route_here(self):
+        self.assertEqual(self._match("delegate: build a parser"), "hermes_delegate")
+        self.assertEqual(self._match("have hermes to run the tests"), "hermes_delegate")
+        self.assertEqual(self._match("hermes: refactor it"), "hermes_delegate")
+        self.assertEqual(self._match("worker: scan the workspace"), "hermes_delegate")
+
+    def test_questions_and_unrelated_text_do_not_route(self):
+        self.assertNotEqual(self._match("what can hermes do?"), "hermes_delegate")
+        self.assertNotEqual(self._match("delegate work to my team tomorrow"), "hermes_delegate")
+        self.assertNotEqual(self._match("search the web for hermes"), "hermes_delegate")
+
+    def test_empty_objective_is_rejected_without_network(self):
+        self.assertIn("Nothing to delegate", run_hermes_delegate("   "))
+
+    def test_disabled_short_circuits(self):
+        with patch.dict(CONFIG, {"hermes_enabled": False}):
+            self.assertIn("disabled", run_hermes_delegate("do a thing"))
+
+    def test_unreachable_adapter_gives_actionable_message(self):
+        with patch("requests.post", side_effect=__import__("requests").RequestException("boom")):
+            out = run_hermes_delegate("do a thing")
+        self.assertIn("unreachable", out)
+        self.assertIn("start-hermes.sh", out)
+
+    def test_completed_task_returns_result(self):
+        import requests
+        post = patch("requests.post", return_value=_FakeResp(201, {"id": "t1"}))
+        # first poll running, then completed
+        polls = [_FakeResp(200, {"status": "running"}),
+                 _FakeResp(200, {"status": "completed", "result": "READY"})]
+        with post, patch("requests.get", side_effect=polls), patch("time.sleep"):
+            out = run_hermes_delegate("say ready", timeout=30)
+        self.assertEqual(out, "READY")
+
+    def test_failed_task_surfaces_error(self):
+        post = patch("requests.post", return_value=_FakeResp(201, {"id": "t2"}))
+        poll = patch("requests.get", return_value=_FakeResp(
+            200, {"status": "failed", "error": {"message": "model exploded"}}))
+        with post, poll, patch("time.sleep"):
+            out = run_hermes_delegate("break it", timeout=30)
+        self.assertIn("failed", out)
+        self.assertIn("model exploded", out)
+
+
+class _FakeResp:
+    def __init__(self, status_code, payload, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text or str(payload)
+
+    def json(self):
+        return self._payload
 
 
 if __name__ == "__main__":

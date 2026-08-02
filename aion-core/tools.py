@@ -317,6 +317,89 @@ def run_firecrawl_scrape(url: str) -> str:
     return markdown
 
 
+def _hermes_url(path: str) -> str:
+    base = str(CONFIG.get("hermes_adapter_url", "http://127.0.0.1:8722")).rstrip("/")
+    return f"{base}{path}"
+
+
+def hermes_available() -> bool:
+    """True if delegation is enabled and the adapter answers /health."""
+    if not CONFIG.get("hermes_enabled", True):
+        return False
+    import requests
+    try:
+        r = requests.get(_hermes_url("/health"), timeout=2)
+        return r.status_code < 500
+    except requests.RequestException:
+        return False
+
+
+def run_hermes_delegate(objective: str, *, timeout: int | None = None) -> str:
+    """Hand a long-running agentic task to the Hermes worker and block until it
+    finishes. POSTs /tasks, polls /tasks/{id} to a terminal state, returns the
+    worker's result (or a plain failure line). Task state lives in the adapter
+    (in-memory); AION is the system of record, so we return the outcome inline.
+
+    Delegation is for multi-step work with a concrete deliverable — building or
+    editing files in the sandbox workspace, running a sequence of commands — not
+    for questions AION should just answer itself. Expect ~10-15s startup.
+    """
+    import time
+    import requests
+
+    objective = (objective or "").strip()
+    if not objective:
+        return "[hermes] Nothing to delegate — give me an objective."
+    if not CONFIG.get("hermes_enabled", True):
+        return "[hermes] Delegation is disabled (hermes_enabled=False)."
+
+    timeout = int(timeout or CONFIG.get("hermes_default_timeout", 600))
+    body = {"objective": objective, "timeout": timeout}
+    try:
+        resp = requests.post(_hermes_url("/tasks"), json=body, timeout=10)
+    except requests.RequestException as exc:
+        return (f"[hermes] Worker adapter unreachable at {CONFIG.get('hermes_adapter_url')}. "
+                f"Start it with `bash scripts/start-hermes.sh` in hermes-aion. ({exc})")
+    if resp.status_code == 400:
+        return "[hermes] Rejected: invalid workspace."
+    if resp.status_code >= 400:
+        return f"[hermes] Adapter error {resp.status_code}: {resp.text[:200]}"
+
+    task_id = (resp.json() or {}).get("id")
+    if not task_id:
+        return "[hermes] Adapter accepted the task but returned no id."
+
+    # Poll to a terminal state. Budget a little beyond the task's own timeout so
+    # the adapter's SIGTERM/SIGKILL path resolves before we give up on it.
+    deadline = time.monotonic() + timeout + 30
+    task = {}
+    while time.monotonic() < deadline:
+        time.sleep(2)
+        try:
+            g = requests.get(_hermes_url(f"/tasks/{task_id}"), timeout=10)
+        except requests.RequestException:
+            continue
+        if g.status_code != 200:
+            continue
+        task = g.json() or {}
+        if task.get("status") in ("completed", "failed", "timeout", "cancelled"):
+            break
+    else:
+        return f"[hermes] Task {task_id} still running after {timeout + 30}s; gave up waiting."
+
+    status = task.get("status")
+    if status == "completed":
+        result = (task.get("result") or "").strip()
+        return result or "[hermes] Completed with no textual result."
+    if status == "timeout":
+        return f"[hermes] Task timed out after {timeout}s."
+    if status == "cancelled":
+        return "[hermes] Task was cancelled."
+    err = task.get("error") or {}
+    msg = err.get("message") if isinstance(err, dict) else err
+    return f"[hermes] Task failed: {msg or 'unknown error'}"
+
+
 def run_maigret(username: str) -> str:
     """Run Maigret username OSINT across 3000+ social sites."""
     safe = username.strip().replace("'", "")
@@ -786,6 +869,24 @@ def _firecrawl_search_matcher(text: str) -> Optional[dict]:
     return None
 
 
+def _hermes_delegate_matcher(text: str) -> Optional[dict]:
+    # Explicit delegation verbs only — this must not swallow ordinary requests
+    # AION should answer itself. "have/ask hermes|the worker to <x>",
+    # "delegate: <x>", "hermes: <x>", "worker: <x>".
+    m = re.match(
+        r"(?i)^(?:"
+        r"(?:have|ask|tell|get)\s+(?:hermes|the\s+worker)\s+to\s+(.+)"
+        r"|(?:delegate|hermes|worker)\s*[:\-]\s*(.+)"
+        r"|delegate\s+to\s+hermes\s*[:\-]?\s*(.+)"
+        r")$",
+        (text or "").strip(),
+    )
+    if not m:
+        return None
+    objective = next((g for g in m.groups() if g), "").strip()
+    return {"objective": objective} if objective else None
+
+
 def _calendar_matcher(text: str) -> Optional[dict]:
     lowered = (text or "").lower()
     if re.search(
@@ -841,6 +942,20 @@ def _build_tool_registry() -> ToolRegistry:
                 installed=lambda: bool(CONFIG.get("kali_enabled")),
             )
         )
+    # Hermes worker delegation — explicit "delegate/hermes: <objective>" only.
+    registry.register(
+        RegisteredTool(
+            tool_id="hermes_delegate",
+            label="Hermes Worker",
+            description=("Delegate a long-running, multi-step agentic task (build/edit files "
+                         "in the sandbox, run a sequence of commands) to the Hermes worker."),
+            matcher=_hermes_delegate_matcher,
+            executor=lambda args, context: run_hermes_delegate(args["objective"]),
+            installed=lambda: bool(CONFIG.get("hermes_enabled", True)),
+            risk="agentic_write",
+            schema={"objective": "the task to hand to the Hermes worker"},
+        )
+    )
     # Firecrawl web tools — registered before tavily so "web search"/"search the
     # web" route here; bare "search" still falls through to tavily_search.
     registry.register(

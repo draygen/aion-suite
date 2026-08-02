@@ -49,6 +49,12 @@ CONFIG = {
     "persona_as_system_message": True,
     "OLLAMA_BASE_URL": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
     "OLLAMA_EMBED_MODEL": "nomic-embed-text",
+    # Hermes worker delegation — AION hands a long-running agentic task to the
+    # hermes-aion adapter (integrations/aion-hermes, loopback :8722), which runs
+    # `hermes -z` against hermes-aion-llama. See hermes-aion/AION-INTEGRATION.md.
+    "hermes_enabled": os.getenv("HERMES_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "hermes_adapter_url": os.getenv("HERMES_ADAPTER_URL", "http://127.0.0.1:8722"),
+    "hermes_default_timeout": int(os.getenv("HERMES_DEFAULT_TIMEOUT", "600")),
     "retrieval": "embed",  # embed | lexical
     "embed_backend": "tfidf",  # tfidf | (legacy: ollama)
     "primary_user": "brian",
