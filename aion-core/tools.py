@@ -18,6 +18,15 @@ log = logging.getLogger("aion.tools")
 _HOST_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]*[a-zA-Z0-9]$")
 _DEFAULT_FFUF_WORDLIST = "/workspace/aion/data/admin_wordlists/ffuf_quick.txt"
 _TOOL_REGISTRY = None
+SAFE_LOCAL_DIAGNOSTIC_TOOL_IDS = frozenset(
+    {
+        "dig",
+        "nmap_ping_sweep",
+        "nslookup",
+        "ping",
+        "traceroute",
+    }
+)
 
 
 @dataclass
@@ -33,6 +42,16 @@ class ToolExecution:
     label: str
     args: dict
     output: str
+
+
+class ToolRuntimeError(RuntimeError):
+    """A registered tool failed before it could produce a safe result."""
+
+    def __init__(self, tool_id: str, label: str, original: Exception):
+        self.tool_id = tool_id
+        self.label = label
+        self.error_type = type(original).__name__
+        super().__init__(f"{self.error_type}: {original}")
 
 
 @dataclass
@@ -82,9 +101,15 @@ class ToolRegistry:
         invocation = self.match(message)
         if not invocation:
             return None
+        return self.execute(invocation, context)
+
+    def execute(self, invocation: ToolInvocation, context: dict | None = None) -> ToolExecution:
         context = context or {}
         tool = self._tool_by_id(invocation.tool_id)
-        output = tool.executor(invocation.args, context)
+        try:
+            output = tool.executor(invocation.args, context)
+        except Exception as exc:
+            raise ToolRuntimeError(tool.tool_id, tool.label, exc) from exc
         return ToolExecution(
             tool_id=invocation.tool_id,
             label=invocation.label,
@@ -394,6 +419,8 @@ def is_authorized_target(target: str) -> bool:
                 allowed = ipaddress.ip_network(pattern, strict=False)
             except ValueError:
                 continue
+            if network.version != allowed.version:
+                continue
             if network.subnet_of(allowed) or network == allowed:
                 return True
         return False
@@ -407,7 +434,11 @@ def is_authorized_target(target: str) -> bool:
         for pattern in _authorized_patterns():
             if "/" in pattern:
                 try:
-                    if ipaddress.ip_address(normalized) in ipaddress.ip_network(pattern, strict=False):
+                    address = ipaddress.ip_address(normalized)
+                    allowed = ipaddress.ip_network(pattern, strict=False)
+                    if address.version != allowed.version:
+                        continue
+                    if address in allowed:
                         return True
                 except ValueError:
                     continue
@@ -973,6 +1004,22 @@ def dispatch_tool_message(message: str, client_ip: str) -> ToolExecution | None:
     if not CONFIG.get("network_ops_enabled", True):
         return None
     return get_tool_registry().dispatch(message, {"client_ip": client_ip})
+
+
+def dispatch_safe_diagnostic_message(message: str, client_ip: str) -> ToolExecution | None:
+    """Run only the small read-only diagnostic subset exposed to local clients.
+
+    Matching happens before execution so broader registry tools (service scans,
+    OSINT, web tests, calendar writes, or Kali commands) are never invoked by
+    this entry point.
+    """
+    if not CONFIG.get("network_ops_enabled", True):
+        return None
+    registry = get_tool_registry()
+    invocation = registry.match(message)
+    if not invocation or invocation.tool_id not in SAFE_LOCAL_DIAGNOSTIC_TOOL_IDS:
+        return None
+    return registry.execute(invocation, {"client_ip": client_ip})
 
 
 def handle_ops_command(message: str, client_ip: str, include_help: bool = True) -> str | None:

@@ -2,7 +2,14 @@ import unittest
 from unittest.mock import patch
 
 from config import CONFIG
-from tools import available_tool_status, dispatch_tool_message, is_authorized_target, handle_ops_command
+from tools import (
+    ToolRuntimeError,
+    available_tool_status,
+    dispatch_safe_diagnostic_message,
+    dispatch_tool_message,
+    handle_ops_command,
+    is_authorized_target,
+)
 
 
 class TestTools(unittest.TestCase):
@@ -30,6 +37,31 @@ class TestTools(unittest.TestCase):
         CONFIG["authorized_network_targets"] = ["203.0.113.0/24"]
         self.assertTrue(is_authorized_target("203.0.113.10"))
         self.assertFalse(is_authorized_target("203.0.114.10"))
+
+    def test_authorizes_ipv4_cidr_with_mixed_family_allowlist(self):
+        CONFIG["authorized_network_targets"] = ["::1", "192.168.0.0/24"]
+        self.assertTrue(is_authorized_target("192.168.0.0/24"))
+        self.assertFalse(is_authorized_target("192.168.1.0/24"))
+
+    def test_authorizes_ipv6_cidr_with_mixed_family_allowlist(self):
+        CONFIG["authorized_network_targets"] = ["127.0.0.1", "fd00::/64"]
+        self.assertTrue(is_authorized_target("fd00::/80"))
+        self.assertFalse(is_authorized_target("fd01::/64"))
+
+    @patch("tools.run_nmap_ping_sweep", return_value="hosts")
+    def test_routes_ping_sweep_with_mixed_family_allowlist(self, mock_sweep):
+        CONFIG["authorized_network_targets"] = ["::1", "192.168.0.0/24"]
+        result = dispatch_tool_message("discover hosts 192.168.0.0/24", "127.0.0.1")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.tool_id, "nmap_ping_sweep")
+        mock_sweep.assert_called_once_with("192.168.0.0/24")
+
+    @patch("tools.run_nmap_ping_sweep", side_effect=TypeError("mixed address family"))
+    def test_wraps_registered_tool_runtime_failures(self, mock_sweep):
+        with self.assertRaises(ToolRuntimeError) as raised:
+            dispatch_tool_message("discover hosts 192.168.0.0/24", "127.0.0.1")
+        self.assertEqual(raised.exception.tool_id, "nmap_ping_sweep")
+        self.assertEqual(raised.exception.error_type, "TypeError")
 
     @patch("tools.run_ping", return_value="ok")
     def test_routes_ping_command(self, mock_ping):
@@ -66,6 +98,20 @@ class TestTools(unittest.TestCase):
 
     def test_dispatch_tool_message_returns_none_for_regular_chat(self):
         self.assertIsNone(dispatch_tool_message("tell me a joke", "1.2.3.4"))
+
+    @patch("tools.run_ping", return_value="ok")
+    def test_safe_diagnostic_dispatch_runs_allowlisted_ping(self, mock_ping):
+        result = dispatch_safe_diagnostic_message("ping app.example.com", "127.0.0.1")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.tool_id, "ping")
+        mock_ping.assert_called_once_with("app.example.com")
+
+    @patch("tools.run_nmap_service_scan", return_value="must not run")
+    def test_safe_diagnostic_dispatch_rejects_service_scan(self, mock_scan):
+        self.assertIsNone(
+            dispatch_safe_diagnostic_message("scan app.example.com", "127.0.0.1")
+        )
+        mock_scan.assert_not_called()
 
     @patch("tools._tool_installed", side_effect=lambda name: name in {"ping", "nmap"})
     @patch("tools._first_installed", return_value=None)

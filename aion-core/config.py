@@ -2,7 +2,7 @@ import os
 
 
 CONFIG = {
-    "model": "qwen3.5:9b",
+    "model": "aion-hauhau",  # ChatML-wrapped HauhauCS Qwen3.5-9B Uncensored (Aggressive) Q4_K_M — see Modelfile.aion-hauhau
     "backend": "ollama",
     "OLLAMA_BASE_URL": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
     "OLLAMA_EMBED_MODEL": "nomic-embed-text",
@@ -64,6 +64,17 @@ CONFIG = {
     "log_backup_count": 3,
     "memory_browser_requires_auth": True,
     "load_pending_facts": False,
+    # PersonaBuilder ChatGPT archive (aion_memory_foundry) — read-only hybrid
+    # RAG over 6k ChatGPT conversations. Blank URL derives the DSN from
+    # DATABASE_URL by swapping the db name, so no separate creds are needed.
+    "chatgpt_archive_enabled": os.getenv("CHATGPT_ARCHIVE_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "chatgpt_archive_url": os.getenv("CHATGPT_ARCHIVE_URL", ""),
+    "chatgpt_embedding_model": os.getenv("CHATGPT_EMBEDDING_MODEL", "qwen3-embedding:0.6b"),
+    # Auto-recall only fires when the turn has at least this many content words
+    # (after stripping greetings/acks/stopwords) — keeps AION from recalling on
+    # "hi"/"thanks". Vector similarity can't gate this (short greetings score
+    # HIGHER than rare-term questions), so we gate on query substance instead.
+    "chatgpt_min_content_tokens": int(os.getenv("CHATGPT_MIN_CONTENT_TOKENS", "1")),
     "authorized_network_targets": [
         "localhost",
         "127.0.0.1",
@@ -126,8 +137,8 @@ CONFIG = {
         # 0.7 gives AION a warmer, more human/conversational voice than the old
         # 0.4 (which was tuned for clipped, deterministic recall). Fact grounding
         # is enforced by the system-prompt rules + retrieval, not by low temp.
-        "temperature": 0.7,
-        "top_p": 0.9,
+        "temperature": 0.45,
+        "top_p": 0.85,
         "top_k": 40,
         "repeat_penalty": 1.15,
         # qwen3.5:9b's base Modelfile ships presence_penalty 1.5; at our low temp
@@ -136,8 +147,11 @@ CONFIG = {
         # model's baked-in defaults.
         "presence_penalty": 0.0,
         "frequency_penalty": 0.0,
-        "num_ctx": int(os.getenv("LLM_NUM_CTX", "16384")),
-        "num_predict": int(os.getenv("LLM_NUM_PREDICT", "2048")),
+        # 32768 measured at ~6.6GB resident / 100% GPU on a 12GB card (RTX, GQA
+        # KV cache is cheap on this 9B). Leaves ~5GB headroom for compute buffers
+        # + desktop. Lower LLM_NUM_CTX if the card is also driving heavy displays.
+        "num_ctx": int(os.getenv("LLM_NUM_CTX", "32768")),
+        "num_predict": int(os.getenv("LLM_NUM_PREDICT", "1000")),
     },
 }
 
