@@ -137,7 +137,7 @@ def main() -> int:
             send = engine.build_messages(conversation, label,
                                          augmented=engine.msg_context_turn(q, blocks))
             try:
-                answer = (ask_llm_chat(send) or "").strip() or "(no response)"
+                answer = engine.clean_reply((ask_llm_chat(send) or "").strip()) or "(no response)"
             except Exception as exc:
                 print(f"AION (error): {exc}\n")
                 continue
@@ -156,7 +156,7 @@ def main() -> int:
         )
 
         try:
-            answer = (ask_llm_chat(window) or "").strip() or "(no response)"
+            answer = engine.clean_reply((ask_llm_chat(window) or "").strip()) or "(no response)"
         except Exception as exc:
             print(f"AION (error): {exc}\n")
             # Nothing was appended yet, so the failed turn leaves no trace.

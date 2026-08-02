@@ -185,20 +185,43 @@ def chat_stream(body: ChatIn):
     def gen():
         yield _sse("meta", {"thread_id": thread_id})
         chunks: list[str] = []
+        # Hold the first tokens back until we can strip any leading "Response:"
+        # label before it reaches the screen — then stream the rest live. The
+        # persona forbids the label; this is the safety net for when it slips.
+        head_open = True
+        head = ""
+
+        def flush_head():
+            cleaned = engine.clean_reply(head)
+            return _sse("token", {"t": cleaned}) if cleaned else None
+
         try:
             for tok in stream_llm_chat(messages):
                 chunks.append(tok)
+                if head_open:
+                    head += tok
+                    # Enough to see a full label, or the model moved past line 1.
+                    if "\n" in head or len(head) >= 24:
+                        head_open = False
+                        ev = flush_head()
+                        if ev:
+                            yield ev
+                    continue
                 yield _sse("token", {"t": tok})
         except Exception as exc:
             logger.warning("stream failed on thread %s: %s", thread_id, exc)
             # Persist whatever arrived before the break so the thread isn't left
             # with a user turn and no reply.
-            partial = "".join(chunks).strip()
+            partial = engine.clean_reply("".join(chunks).strip())
             if partial:
                 _store.save_turn(thread_id, body.message, partial)
             yield _sse("error", {"error": str(exc), "partial": bool(partial)})
             return
-        reply = "".join(chunks).strip() or "(no response)"
+        if head_open:  # stream ended inside the held-back head
+            ev = flush_head()
+            if ev:
+                yield ev
+        reply = engine.clean_reply("".join(chunks).strip()) or "(no response)"
         _store.save_turn(thread_id, body.message, reply)
         yield _sse("done", {"thread_id": thread_id})
 
@@ -225,7 +248,7 @@ def msg(body: MsgIn):
     messages = engine.build_messages(prior, label,
                                      augmented=engine.msg_context_turn(body.query, blocks))
     try:
-        reply = (engine.ask_llm_chat(messages) or "").strip() or "(no response)"
+        reply = engine.clean_reply((engine.ask_llm_chat(messages) or "").strip()) or "(no response)"
     except Exception as exc:
         logger.warning("/api/msg failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc))

@@ -37,12 +37,17 @@ class TestBuildMessages(unittest.TestCase):
         gpt = patch.object(engine, "chatgpt_store", None)
         self.addCleanup(gpt.stop)
         gpt.start()
+        # These tests assert on turn structure; persona injection is covered
+        # separately in TestPersona. Disable it here so a leading system message
+        # doesn't shift every index.
+        pers = patch.dict(engine.CONFIG, {"persona_as_system_message": False})
+        self.addCleanup(pers.stop)
+        pers.start()
 
-    def test_appends_user_turn_and_emits_no_system_role(self):
+    def test_appends_user_turn(self):
         prior = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey"}]
         msgs = engine.build_messages(prior, "what's up")
         self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user"])
-        self.assertNotIn("system", [m["role"] for m in msgs])
         self.assertEqual(msgs[-1]["content"], "what's up")
 
     def test_drops_leading_assistant_turns(self):
@@ -177,6 +182,56 @@ class TestStoreSourceScoping(unittest.TestCase):
     def test_default_source_is_cli(self):
         store = engine.Store.__new__(engine.Store)
         self.assertEqual(engine.Store.__init__.__defaults__, ("cli",))
+
+
+class TestPersona(unittest.TestCase):
+    def setUp(self):
+        for p in (patch.object(engine, "get_facts", return_value=[]),
+                  patch.object(engine, "_MEMORY_AVAILABLE", False),
+                  patch.object(engine, "chatgpt_store", None)):
+            self.addCleanup(p.stop)
+            p.start()
+
+    def test_persona_prepended_as_system_when_enabled(self):
+        with patch.dict(engine.CONFIG, {"persona": "BE AION", "persona_as_system_message": True}):
+            msgs = engine.build_messages([{"role": "user", "content": "hi"}], "yo")
+        self.assertEqual(msgs[0]["role"], "system")
+        self.assertEqual(msgs[0]["content"], "BE AION")
+        self.assertEqual(msgs[-1]["content"], "yo")
+
+    def test_persona_omitted_when_flag_off(self):
+        with patch.dict(engine.CONFIG, {"persona": "BE AION", "persona_as_system_message": False}):
+            msgs = engine.build_messages([], "hi")
+        self.assertNotIn("system", [m["role"] for m in msgs])
+
+    def test_persona_omitted_when_empty(self):
+        with patch.dict(engine.CONFIG, {"persona": "", "persona_as_system_message": True}):
+            msgs = engine.build_messages([], "hi")
+        self.assertNotIn("system", [m["role"] for m in msgs])
+
+    def test_shipped_config_enables_persona(self):
+        # The real config.py must actually turn this on, or the app reverts to
+        # the generic helpdesk voice this whole change exists to kill.
+        self.assertTrue(engine.CONFIG.get("persona"))
+        self.assertTrue(engine.CONFIG.get("persona_as_system_message"))
+
+
+class TestCleanReply(unittest.TestCase):
+    def test_strips_plain_and_bold_labels(self):
+        self.assertEqual(engine.clean_reply("Response: hey"), "hey")
+        self.assertEqual(engine.clean_reply("**Response:**\n\nHi Brian"), "Hi Brian")
+        self.assertEqual(engine.clean_reply("**Reply:** test"), "test")
+        self.assertEqual(engine.clean_reply("AION: yo"), "yo")
+        self.assertEqual(engine.clean_reply("  Answer:\nok"), "ok")
+
+    def test_leaves_ordinary_text_untouched(self):
+        self.assertEqual(engine.clean_reply("Vim. Period."), "Vim. Period.")
+        # word boundary: "response to..." is prose, not a label
+        self.assertTrue(engine.clean_reply("response to your question is fine")
+                        .startswith("response to"))
+
+    def test_handles_empty(self):
+        self.assertEqual(engine.clean_reply(""), "")
 
 
 if __name__ == "__main__":

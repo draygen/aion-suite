@@ -16,6 +16,7 @@ Design rules:
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -355,7 +356,28 @@ def build_messages(prior_turns: list[dict], user_text: str, *,
         window.pop(0)
     window[-1]["content"] = augmented if augmented is not None else augment_user_turn(
         user_text, utc_now(), last_seen, gap_seconds, include_continuity)
+    persona = CONFIG.get("persona")
+    if persona and CONFIG.get("persona_as_system_message"):
+        # A real system message — the raw HF model accepts one, and it's where a
+        # persona belongs. (aion-hauhau 400s on system role; that's what the
+        # persona_as_system_message flag is for. See config.py.)
+        window.insert(0, {"role": "system", "content": persona})
     return window
+
+
+# Labels the base model sometimes prefixes despite the persona telling it not to.
+# Handles bold either side of the colon: "Response:", "**Response:**", "**Reply:** x".
+_LEAD_LABEL = re.compile(
+    r"^\s*(?:\*\*|__)?\s*(?:response|answer|reply|aion|assistant)\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*\n*",
+    re.IGNORECASE)
+
+
+def clean_reply(text: str) -> str:
+    """Strip a leading 'Response:' / 'AION:' style label the model occasionally
+    emits. Belt-and-suspenders behind the persona's no-label instruction."""
+    if not text:
+        return text
+    return _LEAD_LABEL.sub("", text, count=1).lstrip()
 
 
 def chat(session_id: str, user_text: str, *, store: Store | None = None,
@@ -368,7 +390,7 @@ def chat(session_id: str, user_text: str, *, store: Store | None = None,
         last_seen, gap = session_last_seen(store)
     messages = build_messages(prior, user_text, include_continuity=include_continuity,
                               last_seen=last_seen, gap_seconds=gap)
-    reply = (ask_llm_chat(messages) or "").strip() or "(no response)"
+    reply = clean_reply((ask_llm_chat(messages) or "").strip()) or "(no response)"
     store.save_turn(session_id, user_text, reply)
     return reply
 
