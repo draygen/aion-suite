@@ -148,14 +148,15 @@ def main() -> int:
             first_turn = False
             continue
 
-        # "Do it on my machine" requests go to the Hermes worker instead of the
-        # LLM, so AION performs the action rather than explaining it.
-        delegated = engine.maybe_delegate_action(user_input)
-        if delegated is not None:
-            print(f"AION: {delegated}\n")
+        # Web search → AION's own firecrawl_search, answered from the real hits.
+        # "Do it on my machine" → the Hermes worker. Both bypass the plain LLM so
+        # AION acts/answers from real data instead of guessing.
+        handled = engine.maybe_web_search(user_input) or engine.maybe_delegate_action(user_input)
+        if handled is not None:
+            print(f"AION: {handled}\n")
             conversation.append({"role": "user", "content": user_input})
-            conversation.append({"role": "assistant", "content": delegated})
-            store.save_turn(session_id, user_input, delegated)
+            conversation.append({"role": "assistant", "content": handled})
+            store.save_turn(session_id, user_input, handled)
             first_turn = False
             continue
 

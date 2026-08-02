@@ -384,6 +384,38 @@ def clean_reply(text: str) -> str:
     return text.lstrip()
 
 
+def maybe_web_search(user_text: str) -> str | None:
+    """If Brian asked to search the web, run AION's own firecrawl_search (direct
+    HTTP — reliable, unlike the Hermes worker which fabricates results) and have
+    AION answer grounded in the real hits. Returns None to let normal chat run.
+    """
+    if not CONFIG.get("firecrawl_enabled", True):
+        return None
+    try:
+        import tools
+    except Exception:
+        return None
+    if not tools._firecrawl_key():
+        return None
+    query = tools.detect_web_search(user_text)
+    if not query:
+        return None
+    results = tools.run_firecrawl_search(query)
+    if not results or results.startswith("[firecrawl]"):
+        return results or None  # surface the error rather than silently chatting
+    grounded = (
+        f'(Live web search results for "{query}" — real and current. Answer Brian '
+        "factually from these, cite a source URL, and don't add facts beyond them:\n"
+        f"{results}\n)\n\nBrian: {user_text}"
+    )
+    try:
+        reply = clean_reply((ask_llm_chat([{"role": "user", "content": grounded}]) or "").strip())
+    except Exception as exc:
+        logger.warning("web-search synthesis failed: %s", exc)
+        return results  # real hits beat nothing
+    return reply or results
+
+
 def maybe_delegate_action(user_text: str) -> str | None:
     """If Brian is asking AION to *do* something on his machine (not asking a
     question), hand it to the Hermes worker and return the worker's output.
@@ -416,6 +448,10 @@ def chat(session_id: str, user_text: str, *, store: Store | None = None,
     the LLM ever sees it, so AION performs the action instead of explaining it.
     """
     store = store or Store()
+    searched = maybe_web_search(user_text)
+    if searched is not None:
+        store.save_turn(session_id, user_text, searched)
+        return searched
     delegated = maybe_delegate_action(user_text)
     if delegated is not None:
         store.save_turn(session_id, user_text, delegated)

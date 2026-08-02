@@ -264,6 +264,25 @@ class TestMachineActionDetection(unittest.TestCase):
         self.assertIn("check my disk space", obj)
 
 
+class TestWebSearchDetection(unittest.TestCase):
+    """Web-search intent → AION's own firecrawl_search. Explicit web phrasings
+    only, so it never steals /msg or plain chat."""
+
+    def test_web_phrasings_yield_a_query(self):
+        self.assertEqual(tools.detect_web_search("search the web for rust news"), "rust news")
+        self.assertEqual(tools.detect_web_search("web search python 3.14"), "python 3.14")
+        self.assertEqual(tools.detect_web_search("google the weather in lowell"),
+                         "the weather in lowell")
+        self.assertEqual(tools.detect_web_search("look up nixos online"), "nixos")
+        self.assertEqual(tools.detect_web_search("what's the latest on the openai case"),
+                         "the openai case")
+
+    def test_non_web_returns_none(self):
+        for m in ("search my messages for jenn", "hi", "how do i search a list in python",
+                  "check my disk space", "/msg birthday", "tell me a joke"):
+            self.assertIsNone(tools.detect_web_search(m), f"false positive: {m!r}")
+
+
 class _FakeResp:
     def __init__(self, status_code, payload, text=""):
         self.status_code = status_code

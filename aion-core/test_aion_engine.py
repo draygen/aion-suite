@@ -251,6 +251,40 @@ class TestActionDelegation(unittest.TestCase):
             self.assertIsNone(engine.maybe_delegate_action("check my disk space"))
 
 
+class TestWebSearch(unittest.TestCase):
+    """maybe_web_search runs AION's direct firecrawl_search and grounds the reply
+    in the real hits; stays out of the way for non-web turns."""
+
+    def test_grounds_reply_in_real_results(self):
+        with patch.dict(engine.CONFIG, {"firecrawl_enabled": True}), \
+             patch("tools._firecrawl_key", return_value="fc-x"), \
+             patch("tools.detect_web_search", return_value="python version"), \
+             patch("tools.run_firecrawl_search", return_value="Title: Download\nURL: python.org\n3.14.6"), \
+             patch.object(engine, "ask_llm_chat", return_value="Latest is 3.14.6 (python.org).") as llm:
+            reply = engine.maybe_web_search("search the web for python version")
+        self.assertEqual(reply, "Latest is 3.14.6 (python.org).")
+        # the model was grounded in the real hits, not left to guess
+        self.assertIn("3.14.6", llm.call_args[0][0][0]["content"])
+
+    def test_non_web_returns_none(self):
+        with patch.dict(engine.CONFIG, {"firecrawl_enabled": True}), \
+             patch("tools._firecrawl_key", return_value="fc-x"), \
+             patch("tools.detect_web_search", return_value=None):
+            self.assertIsNone(engine.maybe_web_search("hi"))
+
+    def test_no_key_returns_none(self):
+        with patch.dict(engine.CONFIG, {"firecrawl_enabled": True}), \
+             patch("tools._firecrawl_key", return_value=""):
+            self.assertIsNone(engine.maybe_web_search("search the web for x"))
+
+    def test_search_error_is_surfaced_not_swallowed(self):
+        with patch.dict(engine.CONFIG, {"firecrawl_enabled": True}), \
+             patch("tools._firecrawl_key", return_value="fc-x"), \
+             patch("tools.detect_web_search", return_value="x"), \
+             patch("tools.run_firecrawl_search", return_value="[firecrawl] Search failed: boom"):
+            self.assertIn("Search failed", engine.maybe_web_search("search the web for x"))
+
+
 class TestCleanReply(unittest.TestCase):
     def test_strips_plain_and_bold_labels(self):
         self.assertEqual(engine.clean_reply("Response: hey"), "hey")

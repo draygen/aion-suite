@@ -374,6 +374,28 @@ def looks_like_machine_action(text: str) -> bool:
     return has_verb or _INTERROGATIVE_ACTION.search(low) is not None
 
 
+_WEB_SEARCH_RE = re.compile(
+    r"(?i)^\s*(?:"
+    r"(?:firecrawl|web\s*search|search\s+the\s+web(?:\s+for)?|search\s+online(?:\s+for)?|"
+    r"search\s+the\s+internet(?:\s+for)?|google|look\s+up)\s+(.+?)"
+    r"|(?:what'?s|what\s+is)\s+the\s+latest\s+(?:news\s+)?(?:on|about|with)\s+(.+?)"
+    r"|(?:find|look\s+up)\s+(.+?)\s+(?:online|on\s+the\s+web|on\s+the\s+internet)"
+    r")(?:\s+(?:online|on\s+the\s+web|on\s+the\s+internet))?\s*\??\s*$"
+)
+
+
+def detect_web_search(text: str) -> Optional[str]:
+    """Natural web-search intent → the query. Explicit web phrasings only
+    ("search the web for X", "google X", "what's the latest on X"), so it won't
+    swallow "search my messages" (/msg) or plain chat. Returns None if not a
+    web search."""
+    m = _WEB_SEARCH_RE.match((text or "").strip())
+    if not m:
+        return None
+    query = next((g for g in m.groups() if g), "").strip()
+    return query or None
+
+
 def build_hermes_objective(request: str) -> str:
     """Wrap Brian's request as a directive objective for the worker. Directive
     phrasing measurably improves the 8B worker's tool-call reliability

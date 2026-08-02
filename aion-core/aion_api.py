@@ -148,6 +148,14 @@ def action(body: ActionIn):
         return {"handled": True, "kind": "diagnostic", "reply": execution.output,
                 "requires_confirmation": False}
 
+    # Web search → AION's own firecrawl_search (direct, reliable), answered
+    # grounded in the real hits. Checked before Hermes delegation: it's faster
+    # and doesn't fabricate the way the worker does.
+    searched = engine.maybe_web_search(body.message)
+    if searched is not None:
+        return {"handled": True, "kind": "web_search", "reply": searched,
+                "requires_confirmation": False}
+
     # Not a fast local diagnostic — is it a "do something on my machine" request?
     # If so, the Hermes worker actually performs it (runs after the safe-local
     # subset, so ping/nmap keep their fast path). Falls through to chat otherwise.
