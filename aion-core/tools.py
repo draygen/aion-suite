@@ -18,6 +18,15 @@ log = logging.getLogger("aion.tools")
 _HOST_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]*[a-zA-Z0-9]$")
 _DEFAULT_FFUF_WORDLIST = "/workspace/aion/data/admin_wordlists/ffuf_quick.txt"
 _TOOL_REGISTRY = None
+SAFE_LOCAL_DIAGNOSTIC_TOOL_IDS = frozenset(
+    {
+        "dig",
+        "nmap_ping_sweep",
+        "nslookup",
+        "ping",
+        "traceroute",
+    }
+)
 
 
 @dataclass
@@ -33,6 +42,16 @@ class ToolExecution:
     label: str
     args: dict
     output: str
+
+
+class ToolRuntimeError(RuntimeError):
+    """A registered tool failed before it could produce a safe result."""
+
+    def __init__(self, tool_id: str, label: str, original: Exception):
+        self.tool_id = tool_id
+        self.label = label
+        self.error_type = type(original).__name__
+        super().__init__(f"{self.error_type}: {original}")
 
 
 @dataclass
@@ -82,9 +101,15 @@ class ToolRegistry:
         invocation = self.match(message)
         if not invocation:
             return None
+        return self.execute(invocation, context)
+
+    def execute(self, invocation: ToolInvocation, context: dict | None = None) -> ToolExecution:
         context = context or {}
         tool = self._tool_by_id(invocation.tool_id)
-        output = tool.executor(invocation.args, context)
+        try:
+            output = tool.executor(invocation.args, context)
+        except Exception as exc:
+            raise ToolRuntimeError(tool.tool_id, tool.label, exc) from exc
         return ToolExecution(
             tool_id=invocation.tool_id,
             label=invocation.label,
@@ -120,6 +145,7 @@ def _unsupported_command_help() -> str:
         "scan <host>, web scan <host>, ping sweep <cidr>, "
         "httpx <url>, whatweb <url>, nikto <url>, testssl <host>, "
         "zap <url>, ffuf <url-or-host>, "
+        "web search <query>, scrape <url>, "
         "calendar <title> <today|tomorrow|YYYY-MM-DD|MM/DD/YYYY> at <time> "
         "notes: <optional notes>. "
         "Kali tools (via Draydev): "
@@ -212,6 +238,256 @@ def run_tavily_search(query: str) -> str:
         return "\n\n".join(results) or "No results found."
     except Exception as e:
         return f"[tavily] Search failed: {str(e)}"
+
+
+_FIRECRAWL_API_BASE = "https://api.firecrawl.dev/v2"
+
+
+def _firecrawl_key() -> str:
+    return (CONFIG.get("firecrawl_api_key") or "").strip()
+
+
+def _firecrawl_post(path: str, payload: dict, timeout: int = 45) -> dict:
+    """POST to the Firecrawl v2 API. Returns parsed JSON, raises on failure."""
+    import requests
+
+    key = _firecrawl_key()
+    if not key:
+        raise RuntimeError(
+            "Firecrawl API key not configured "
+            "(set firecrawl_api_key in config_local.py or the FIRECRAWL_API_KEY env var)."
+        )
+    resp = requests.post(
+        f"{_FIRECRAWL_API_BASE}{path}",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def run_firecrawl_search(query: str, limit: int | None = None) -> str:
+    """Search the web via Firecrawl; return titles, URLs, and snippets."""
+    query = (query or "").strip()
+    if not query:
+        return "[firecrawl] Empty search query."
+    limit = limit or int(CONFIG.get("firecrawl_search_limit", 5) or 5)
+    try:
+        data = _firecrawl_post("/search", {"query": query, "limit": limit})
+    except Exception as e:
+        return f"[firecrawl] Search failed: {e}"
+    payload = data.get("data") or {}
+    # v2 returns {"data": {"web": [...]}}; tolerate a bare list too.
+    results = payload.get("web") if isinstance(payload, dict) else payload
+    if not results:
+        return "No results found."
+    blocks = []
+    for res in results[:limit]:
+        title = res.get("title") or "(untitled)"
+        url = res.get("url") or ""
+        desc = (res.get("description") or res.get("snippet") or "").strip()
+        block = f"Title: {title}\nURL: {url}"
+        if desc:
+            block += f"\n{desc[:300]}"
+        blocks.append(block)
+    return "\n\n".join(blocks)
+
+
+def run_firecrawl_scrape(url: str) -> str:
+    """Scrape a single URL via Firecrawl; return clean markdown."""
+    url = (url or "").strip()
+    if not url:
+        return "[firecrawl] No URL provided."
+    if "://" not in url:
+        url = f"https://{url}"
+    try:
+        data = _firecrawl_post(
+            "/scrape", {"url": url, "formats": ["markdown"], "onlyMainContent": True}
+        )
+    except Exception as e:
+        return f"[firecrawl] Scrape failed: {e}"
+    payload = data.get("data") or {}
+    markdown = (payload.get("markdown") or "").strip()
+    if not markdown:
+        return "[firecrawl] No content extracted."
+    max_chars = 6000
+    if len(markdown) > max_chars:
+        markdown = markdown[:max_chars] + "\n... (truncated)"
+    return markdown
+
+
+def _hermes_url(path: str) -> str:
+    base = str(CONFIG.get("hermes_adapter_url", "http://127.0.0.1:8722")).rstrip("/")
+    return f"{base}{path}"
+
+
+# ── Natural-language "do something on my machine" detection ──────────────────
+#
+# Brian shouldn't have to type "delegate:". If he asks AION to actually DO
+# something on his computer, that goes to the Hermes worker; if he asks a
+# question, AION answers it. The split is: an action VERB aimed at a SYSTEM
+# target, and NOT phrased as a how-to / explain question.
+
+_ACTION_VERB = (
+    r"check|show|list|find|get|display|run|execute|exec|launch|start|stop|restart|"
+    r"kill|install|uninstall|update|upgrade|clean|clear|delete|remove|wipe|create|"
+    r"make|mkdir|move|copy|rename|open|scan|monitor|configure|build|fix|mount|"
+    r"unmount|free\s*up|set\s*up|look\s+at|pull\s+up"
+)
+_SYSTEM_TARGET = (
+    r"disk|space|storage|drive|[a-z]:\\?|memory|ram|swap|cpu|load\s*average|"
+    r"process(?:es)?|port|ports|service|services|daemon|file|files|folder|folders|"
+    r"director(?:y|ies)|\bdir\b|path|network|interface|\bip\b|temp|cache|logs?|"
+    r"package|uptime|kernel|mount|"
+    r"my\s+(?:computer|machine|system|box|pc|laptop|desktop|drive|files)|"
+    r"this\s+(?:machine|computer|box|pc|system)"
+)
+# Conceptual questions AION should answer itself — never delegate these.
+_HOWTO_EXCLUDE = re.compile(
+    r"(?i)^\s*(?:how\s+(?:do|to|can|would|should|does)|what\s+is|what's\s+a\b|"
+    r"what\s+are|what's\s+the\s+(?:difference|command|best)|explain|why\b|describe|"
+    r"tell\s+me\s+about|what\s+does|difference\s+between|when\s+should|should\s+i\b|"
+    r"is\s+it\s+(?:safe|ok|possible)|can\s+you\s+explain)\b"
+)
+# Question forms that ARE a machine action ("what's using port 80", "how much
+# space is left") — asking AION to go find out, not to explain a concept.
+_INTERROGATIVE_ACTION = re.compile(
+    r"(?i)(?:what'?s?\s+(?:using|running\s+on|eating|hogging|taking\s+up|listening\s+on)"
+    r"|how\s+much\s+(?:disk\s+)?(?:space|ram|memory|storage)\b"
+    r"|is\s+\S+\s+running\b)"
+)
+
+
+def looks_like_machine_action(text: str) -> bool:
+    """Heuristic: is Brian asking AION to perform a local action (→ Hermes),
+    rather than asking a question (→ AION answers)? Verb + system target, minus
+    how-to/explain phrasing."""
+    t = (text or "").strip()
+    if not t or _HOWTO_EXCLUDE.search(t):
+        return False
+    low = t.lower()
+    has_target = re.search(rf"(?i)(?:{_SYSTEM_TARGET})", low) is not None
+    if not has_target:
+        return False
+    has_verb = re.search(rf"(?i)\b(?:{_ACTION_VERB})\b", low) is not None
+    return has_verb or _INTERROGATIVE_ACTION.search(low) is not None
+
+
+_WEB_SEARCH_RE = re.compile(
+    r"(?i)^\s*(?:"
+    r"(?:firecrawl|web\s*search|search\s+the\s+web(?:\s+for)?|search\s+online(?:\s+for)?|"
+    r"search\s+the\s+internet(?:\s+for)?|google|look\s+up)\s+(.+?)"
+    r"|(?:what'?s|what\s+is)\s+the\s+latest\s+(?:news\s+)?(?:on|about|with)\s+(.+?)"
+    r"|(?:find|look\s+up)\s+(.+?)\s+(?:online|on\s+the\s+web|on\s+the\s+internet)"
+    r")(?:\s+(?:online|on\s+the\s+web|on\s+the\s+internet))?\s*\??\s*$"
+)
+
+
+def detect_web_search(text: str) -> Optional[str]:
+    """Natural web-search intent → the query. Explicit web phrasings only
+    ("search the web for X", "google X", "what's the latest on X"), so it won't
+    swallow "search my messages" (/msg) or plain chat. Returns None if not a
+    web search."""
+    m = _WEB_SEARCH_RE.match((text or "").strip())
+    if not m:
+        return None
+    query = next((g for g in m.groups() if g), "").strip()
+    return query or None
+
+
+def build_hermes_objective(request: str) -> str:
+    """Wrap Brian's request as a directive objective for the worker. Directive
+    phrasing measurably improves the 8B worker's tool-call reliability
+    (AION-INTEGRATION.md guidance #2), and the C:\\ → /mnt/c note keeps it from
+    fumbling Windows paths inside its Linux sandbox."""
+    return (
+        "Use your terminal tools to ACTUALLY run the command(s) needed and report the "
+        "real output. Do not guess or fabricate results. Note: Windows paths like C:\\ "
+        "are mounted under /mnt/c in this Linux environment (C:\\ = /mnt/c, D:\\ = /mnt/d). "
+        f"Task: {request.strip()}"
+    )
+
+
+def hermes_available() -> bool:
+    """True if delegation is enabled and the adapter answers /health."""
+    if not CONFIG.get("hermes_enabled", True):
+        return False
+    import requests
+    try:
+        r = requests.get(_hermes_url("/health"), timeout=2)
+        return r.status_code < 500
+    except requests.RequestException:
+        return False
+
+
+def run_hermes_delegate(objective: str, *, timeout: int | None = None) -> str:
+    """Hand a long-running agentic task to the Hermes worker and block until it
+    finishes. POSTs /tasks, polls /tasks/{id} to a terminal state, returns the
+    worker's result (or a plain failure line). Task state lives in the adapter
+    (in-memory); AION is the system of record, so we return the outcome inline.
+
+    Delegation is for multi-step work with a concrete deliverable — building or
+    editing files in the sandbox workspace, running a sequence of commands — not
+    for questions AION should just answer itself. Expect ~10-15s startup.
+    """
+    import time
+    import requests
+
+    objective = (objective or "").strip()
+    if not objective:
+        return "[hermes] Nothing to delegate — give me an objective."
+    if not CONFIG.get("hermes_enabled", True):
+        return "[hermes] Delegation is disabled (hermes_enabled=False)."
+
+    timeout = int(timeout or CONFIG.get("hermes_default_timeout", 600))
+    body = {"objective": objective, "timeout": timeout}
+    toolsets = [t.strip() for t in str(CONFIG.get("hermes_toolsets", "")).split(",") if t.strip()]
+    if toolsets:
+        body["allowed_tools"] = toolsets
+    try:
+        resp = requests.post(_hermes_url("/tasks"), json=body, timeout=10)
+    except requests.RequestException as exc:
+        return (f"[hermes] Worker adapter unreachable at {CONFIG.get('hermes_adapter_url')}. "
+                f"Start it with `bash scripts/start-hermes.sh` in hermes-aion. ({exc})")
+    if resp.status_code == 400:
+        return "[hermes] Rejected: invalid workspace."
+    if resp.status_code >= 400:
+        return f"[hermes] Adapter error {resp.status_code}: {resp.text[:200]}"
+
+    task_id = (resp.json() or {}).get("id")
+    if not task_id:
+        return "[hermes] Adapter accepted the task but returned no id."
+
+    # Poll to a terminal state. Budget a little beyond the task's own timeout so
+    # the adapter's SIGTERM/SIGKILL path resolves before we give up on it.
+    deadline = time.monotonic() + timeout + 30
+    task = {}
+    while time.monotonic() < deadline:
+        time.sleep(2)
+        try:
+            g = requests.get(_hermes_url(f"/tasks/{task_id}"), timeout=10)
+        except requests.RequestException:
+            continue
+        if g.status_code != 200:
+            continue
+        task = g.json() or {}
+        if task.get("status") in ("completed", "failed", "timeout", "cancelled"):
+            break
+    else:
+        return f"[hermes] Task {task_id} still running after {timeout + 30}s; gave up waiting."
+
+    status = task.get("status")
+    if status == "completed":
+        result = (task.get("result") or "").strip()
+        return result or "[hermes] Completed with no textual result."
+    if status == "timeout":
+        return f"[hermes] Task timed out after {timeout}s."
+    if status == "cancelled":
+        return "[hermes] Task was cancelled."
+    err = task.get("error") or {}
+    msg = err.get("message") if isinstance(err, dict) else err
+    return f"[hermes] Task failed: {msg or 'unknown error'}"
 
 
 def run_maigret(username: str) -> str:
@@ -394,6 +670,8 @@ def is_authorized_target(target: str) -> bool:
                 allowed = ipaddress.ip_network(pattern, strict=False)
             except ValueError:
                 continue
+            if network.version != allowed.version:
+                continue
             if network.subnet_of(allowed) or network == allowed:
                 return True
         return False
@@ -407,7 +685,11 @@ def is_authorized_target(target: str) -> bool:
         for pattern in _authorized_patterns():
             if "/" in pattern:
                 try:
-                    if ipaddress.ip_address(normalized) in ipaddress.ip_network(pattern, strict=False):
+                    address = ipaddress.ip_address(normalized)
+                    allowed = ipaddress.ip_network(pattern, strict=False)
+                    if address.version != allowed.version:
+                        continue
+                    if address in allowed:
                         return True
                 except ValueError:
                     continue
@@ -665,6 +947,36 @@ def _osint_investigate_matcher(text: str) -> Optional[dict]:
     return None
 
 
+def _firecrawl_search_matcher(text: str) -> Optional[dict]:
+    # Explicit web-search triggers only, so this does not swallow bare "search"
+    # (owned by tavily_search) or OSINT verbs ("who is", "look up").
+    m = re.match(
+        r"(?i)^(?:firecrawl|web\s*search|search\s+the\s+web(?:\s+for)?|search\s+online(?:\s+for)?)\s+(.+)$",
+        (text or "").strip(),
+    )
+    if m:
+        return {"query": m.group(1).strip()}
+    return None
+
+
+def _hermes_delegate_matcher(text: str) -> Optional[dict]:
+    # Explicit delegation verbs only — this must not swallow ordinary requests
+    # AION should answer itself. "have/ask hermes|the worker to <x>",
+    # "delegate: <x>", "hermes: <x>", "worker: <x>".
+    m = re.match(
+        r"(?i)^(?:"
+        r"(?:have|ask|tell|get)\s+(?:hermes|the\s+worker)\s+to\s+(.+)"
+        r"|(?:delegate|hermes|worker)\s*[:\-]\s*(.+)"
+        r"|delegate\s+to\s+hermes\s*[:\-]?\s*(.+)"
+        r")$",
+        (text or "").strip(),
+    )
+    if not m:
+        return None
+    objective = next((g for g in m.groups() if g), "").strip()
+    return {"objective": objective} if objective else None
+
+
 def _calendar_matcher(text: str) -> Optional[dict]:
     lowered = (text or "").lower()
     if re.search(
@@ -720,6 +1032,47 @@ def _build_tool_registry() -> ToolRegistry:
                 installed=lambda: bool(CONFIG.get("kali_enabled")),
             )
         )
+    # Hermes worker delegation — explicit "delegate/hermes: <objective>" only.
+    registry.register(
+        RegisteredTool(
+            tool_id="hermes_delegate",
+            label="Hermes Worker",
+            description=("Delegate a long-running, multi-step agentic task (build/edit files "
+                         "in the sandbox, run a sequence of commands) to the Hermes worker."),
+            matcher=_hermes_delegate_matcher,
+            executor=lambda args, context: run_hermes_delegate(args["objective"]),
+            installed=lambda: bool(CONFIG.get("hermes_enabled", True)),
+            risk="agentic_write",
+            schema={"objective": "the task to hand to the Hermes worker"},
+        )
+    )
+    # Firecrawl web tools — registered before tavily so "web search"/"search the
+    # web" route here; bare "search" still falls through to tavily_search.
+    registry.register(
+        RegisteredTool(
+            tool_id="firecrawl_scrape",
+            label="Firecrawl Scrape",
+            description="Fetch a URL and return clean markdown via Firecrawl.",
+            matcher=_regex_match(
+                r"^(?:scrape|fetch(?:\s+page)?|grab(?:\s+page)?|read\s+(?:the\s+)?(?:page|url))\s+(\S+)$",
+                ("url",),
+            ),
+            executor=lambda args, context: run_firecrawl_scrape(args["url"]),
+            installed=lambda: bool(CONFIG.get("firecrawl_enabled", True) and _firecrawl_key()),
+            schema={"url": "page URL to scrape"},
+        )
+    )
+    registry.register(
+        RegisteredTool(
+            tool_id="firecrawl_search",
+            label="Firecrawl Search",
+            description="Search the web via Firecrawl and return titles, URLs, and snippets.",
+            matcher=_firecrawl_search_matcher,
+            executor=lambda args, context: run_firecrawl_search(args["query"]),
+            installed=lambda: bool(CONFIG.get("firecrawl_enabled", True) and _firecrawl_key()),
+            schema={"query": "web search query"},
+        )
+    )
     # Tavily for explicit web/search queries (not osint — those go to osint_investigate)
     registry.register(
         RegisteredTool(
@@ -973,6 +1326,22 @@ def dispatch_tool_message(message: str, client_ip: str) -> ToolExecution | None:
     if not CONFIG.get("network_ops_enabled", True):
         return None
     return get_tool_registry().dispatch(message, {"client_ip": client_ip})
+
+
+def dispatch_safe_diagnostic_message(message: str, client_ip: str) -> ToolExecution | None:
+    """Run only the small read-only diagnostic subset exposed to local clients.
+
+    Matching happens before execution so broader registry tools (service scans,
+    OSINT, web tests, calendar writes, or Kali commands) are never invoked by
+    this entry point.
+    """
+    if not CONFIG.get("network_ops_enabled", True):
+        return None
+    registry = get_tool_registry()
+    invocation = registry.match(message)
+    if not invocation or invocation.tool_id not in SAFE_LOCAL_DIAGNOSTIC_TOOL_IDS:
+        return None
+    return registry.execute(invocation, {"client_ip": client_ip})
 
 
 def handle_ops_command(message: str, client_ip: str, include_help: bool = True) -> str | None:

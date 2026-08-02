@@ -40,8 +40,9 @@ from events import list_events, log_event
 from extractor import extract_and_save
 from llm import ask_llm_chat
 from profile_builder import get_profile_summary, build_profile_summary, invalidate_cache as invalidate_profile_cache
-from tools import available_tool_status, dispatch_tool_message, handle_ops_command
+from tools import ToolRuntimeError, available_tool_status, dispatch_tool_message, handle_ops_command
 from agent import run_agent_turn
+from repair import handle_repair_command, propose_repair_for_failure
 from kali_routes import kali_bp
 from fleet_topology import fleet_bp
 from fleet_control import handle_fleet_command
@@ -1641,13 +1642,66 @@ def chat():
                     payload={"destination": "user_memory"},
                 )
 
-        # Network commands bypass LLM
+        # Repair decisions are explicit, session-bound commands and are handled
+        # before normal tools or the LLM. Proposal generation itself is read-only.
+        repair_result = None
+        if not user_message.lower().startswith("remember:"):
+            repair_result = handle_repair_command(
+                user_message,
+                username=username,
+                session_id=envelope["session_id"],
+            )
+        if repair_result:
+            for event in repair_result.events:
+                log_event(
+                    user_id=user_id,
+                    session_id=envelope["session_id"],
+                    channel=envelope["channel"],
+                    thread_id=envelope["thread_id"],
+                    message_id=envelope["request_message_id"],
+                    event_type=event.get("event_type", "repair_event"),
+                    source="repair",
+                    content=None,
+                    payload=event.get("payload"),
+                )
+            response = repair_result.response
+            sanitize_response = False
+
+        # Network commands bypass LLM. Recognized runtime failures may produce a
+        # project-local repair proposal, but never apply one at this stage.
         print(f'[chat_debug_stdout] Attempting tool dispatch for: {user_message}', flush=True)
         logger.info(f'[chat_debug] Attempting tool dispatch for: {user_message}')
-        if not user_message.lower().startswith("remember:"):
-            tool_execution = dispatch_tool_message(user_message, client_ip)
-        else:
-            tool_execution = None
+        tool_execution = None
+        if not user_message.lower().startswith("remember:") and "response" not in locals():
+            try:
+                tool_execution = dispatch_tool_message(user_message, client_ip)
+            except ToolRuntimeError as exc:
+                repair_result = propose_repair_for_failure(
+                    str(exc),
+                    tool_id=exc.tool_id,
+                    username=username,
+                    session_id=envelope["session_id"],
+                )
+                if repair_result:
+                    for event in repair_result.events:
+                        log_event(
+                            user_id=user_id,
+                            session_id=envelope["session_id"],
+                            channel=envelope["channel"],
+                            thread_id=envelope["thread_id"],
+                            message_id=envelope["request_message_id"],
+                            event_type=event.get("event_type", "repair_event"),
+                            source="repair",
+                            content=None,
+                            payload=event.get("payload"),
+                        )
+                    response = repair_result.response
+                else:
+                    response = (
+                        f"{exc.label} failed locally ({exc.error_type}). "
+                        "No conservative repair recipe matched, so no changes were proposed or made."
+                    )
+                sanitize_response = False
         logger.info(f'[chat_debug] Tool dispatch result: {tool_execution}')
 
         if "response" not in locals() and _is_system_prompt_query(user_message):

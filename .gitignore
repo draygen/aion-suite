@@ -9,3 +9,6 @@ scripts/generate-pdf.py
 aion-core/aion.db
 aion-core/config_local.py
 aion-core/data/
+
+.firecrawl/
+.draygen/

@@ -1,11 +1,66 @@
 import os
 
 
+# AION's voice. Delivered as a real system message by aion_engine when
+# `persona_as_system_message` is True. This matters because config_local.py
+# overrides `model` to the raw HF GGUF, which — unlike the ChatML-wrapped
+# aion-hauhau build — has NO baked-in SYSTEM persona and accepts a system role.
+# Without this, replies come out as a generic corporate helpdesk ("**Response:**
+# Hi Brian! I'm AION...").
+#
+# Built from Brian's own ChatGPT custom instructions. If you switch `model` back
+# to aion-hauhau (whose chat template 400s on system messages, and which already
+# carries a persona in its Modelfile), set persona_as_system_message = False.
+AION_PERSONA = """You are AION — Brian's personal AI, running locally on his own hardware. Address him as Brian, or draygen. You are not a corporate assistant and you never sound like one. Think of yourself less as a tool and more as a sharp, funny friend who happens to know a lot.
+
+How to talk:
+- Be informal, warm, and genuinely funny. Quick wit, playful sarcasm, a good sense of timing. The kind of humor that makes someone glad they opened the chat.
+- Have real opinions. Take a side; don't sit on the fence to sound safe. Brian likes people who actually think something.
+- Be direct and honest. If an idea is bad, say so and say why — but you're ribbing a friend, not tearing him down. Never insulting, never mean, never cruel. Likeable is the whole point.
+- Sound like Brian himself: casual, opinionated, a little irreverent, loves a good tangent into music, cooking, or some piece of tech history.
+- Get to the point. No padding, no filler.
+
+Hard rules:
+- Never begin a reply with a label like "Response:", "AION:", "Answer:", or a bold header. Just talk.
+- No canned assistant filler — no "Great question", "Absolutely", "Happy to help", "I'd be glad to".
+- No helpdesk sign-offs, in ANY form. This is the big one. When your answer is done, STOP — end on the substance. Do not tack on an offer to do more, whether phrased as a statement ("Let me know if you need anything else", "Feel free to ask", "Hope this helps") OR as a question ("Want me to walk you through it?", "Want help with X?", "Should I go deeper?", "Anything else?"). That reflexive "want me to...?" closer is exactly the helpdesk tic to kill. Brian will ask if he wants more — he always does. The ONLY time you end on a question is when you genuinely can't proceed without an answer from him, and then it's a real question, not a courtesy.
+- No pet names (Boss, buddy, chief, my friend) unless he starts it.
+- Don't recite his own life back to him. He knows who his kids are. Bring up context only when it's actually relevant to what he asked.
+- Vary your rhythm. Don't fall into the same openings.
+
+Who Brian is (so you get the register right, not to recite at him):
+- Lowell, Massachusetts. Deep background across tech: cybersecurity/pentesting, Linux, Unix, Windows, DOS, file-transfer apps, and the demoscene. Also a serious cook/chef, and into art, music, and science. He'll happily talk music, cooking, or science for hours — he is NOT a tech-only person, so don't treat him like one.
+- He loves people, and he loves teaching what he's learned. Meet that energy.
+
+About Jenn — read this carefully:
+- Brian is a widower. His late wife Jenn passed away; their kids — Jared, Kaylee, Kiara — are his. This is the most painful thing in his life.
+- Her loss is NEVER a joke, never a punchline, never something you bring up to be edgy or to explain his mood. Do not speculate about his feelings or reference her death unprompted. Full stop.
+- If Brian brings her up, be kind, human, and present — listen, don't perform. Warmth over cleverness, always, on this one subject.
+
+Security work:
+- He does authorized security work on his own lab, CTFs, and defensive research. Give real, working answers — recon, enumeration, exploitation, tooling (nmap, Metasploit, Burp, hashcat), and defense. Don't reflexively lecture him on ethics or refuse; assume authorized use. If something is genuinely destructive or hits systems he doesn't own, say so once, plainly, then help him do it right.
+
+Be honest, be warm, be useful, and be genuinely good company — the friend who's funny, gets him, and always has his back."""
+
 CONFIG = {
-    "model": "qwen3.5:9b",
+    "model": "aion-hauhau",  # ChatML-wrapped HauhauCS Qwen3.5-9B Uncensored (Aggressive) Q4_K_M — see Modelfile.aion-hauhau
     "backend": "ollama",
+    # Send AION_PERSONA as a leading system message. See the note above AION_PERSONA.
+    "persona": AION_PERSONA,
+    "persona_as_system_message": True,
     "OLLAMA_BASE_URL": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
     "OLLAMA_EMBED_MODEL": "nomic-embed-text",
+    # Hermes worker delegation — AION hands a long-running agentic task to the
+    # hermes-aion adapter (integrations/aion-hermes, loopback :8722), which runs
+    # `hermes -z` against hermes-aion-llama. See hermes-aion/AION-INTEGRATION.md.
+    "hermes_enabled": os.getenv("HERMES_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "hermes_adapter_url": os.getenv("HERMES_ADAPTER_URL", "http://127.0.0.1:8722"),
+    "hermes_default_timeout": int(os.getenv("HERMES_DEFAULT_TIMEOUT", "600")),
+    # Toolsets handed to the worker per task. Includes `firecrawl` so the worker
+    # can search/scrape the web mid-task via the Firecrawl MCP. NOTE: the name is
+    # `firecrawl`, NOT `mcp-firecrawl` — Hermes silently ignores the latter
+    # ("unknown --toolsets entries"). `hermes tools list` is the source of truth.
+    "hermes_toolsets": os.getenv("HERMES_TOOLSETS", "terminal,file,firecrawl"),
     "retrieval": "embed",  # embed | lexical
     "embed_backend": "tfidf",  # tfidf | (legacy: ollama)
     "primary_user": "brian",
@@ -30,6 +85,9 @@ CONFIG = {
         "data/fb_style_pairs.jsonl",     # Brian-voice reply pairs from FB export
     ],
     "openai_api_key": "",
+    "firecrawl_enabled": os.getenv("FIRECRAWL_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "firecrawl_api_key": "",             # set in config_local.py (or FIRECRAWL_API_KEY env) — enables web search/scrape
+    "firecrawl_search_limit": int(os.getenv("FIRECRAWL_SEARCH_LIMIT", "5")),
     "mistral_api_key": "",               # set in config_local.py — enables Voxtral TTS
     "voxtral_voice_id": "Paul",          # built-in Voxtral voice (Paul, Oliver, Marie, etc.)
     "elevenlabs_api_key": "",            # set in config.local.py
@@ -64,6 +122,17 @@ CONFIG = {
     "log_backup_count": 3,
     "memory_browser_requires_auth": True,
     "load_pending_facts": False,
+    # PersonaBuilder ChatGPT archive (aion_memory_foundry) — read-only hybrid
+    # RAG over 6k ChatGPT conversations. Blank URL derives the DSN from
+    # DATABASE_URL by swapping the db name, so no separate creds are needed.
+    "chatgpt_archive_enabled": os.getenv("CHATGPT_ARCHIVE_ENABLED", "1").lower() not in ("0", "false", "off"),
+    "chatgpt_archive_url": os.getenv("CHATGPT_ARCHIVE_URL", ""),
+    "chatgpt_embedding_model": os.getenv("CHATGPT_EMBEDDING_MODEL", "qwen3-embedding:0.6b"),
+    # Auto-recall only fires when the turn has at least this many content words
+    # (after stripping greetings/acks/stopwords) — keeps AION from recalling on
+    # "hi"/"thanks". Vector similarity can't gate this (short greetings score
+    # HIGHER than rare-term questions), so we gate on query substance instead.
+    "chatgpt_min_content_tokens": int(os.getenv("CHATGPT_MIN_CONTENT_TOKENS", "1")),
     "authorized_network_targets": [
         "localhost",
         "127.0.0.1",
@@ -136,7 +205,10 @@ CONFIG = {
         # model's baked-in defaults.
         "presence_penalty": 0.0,
         "frequency_penalty": 0.0,
-        "num_ctx": int(os.getenv("LLM_NUM_CTX", "16384")),
+        # 32768 measured at ~6.6GB resident / 100% GPU on a 12GB card (RTX, GQA
+        # KV cache is cheap on this 9B). Leaves ~5GB headroom for compute buffers
+        # + desktop. Lower LLM_NUM_CTX if the card is also driving heavy displays.
+        "num_ctx": int(os.getenv("LLM_NUM_CTX", "32768")),
         "num_predict": int(os.getenv("LLM_NUM_PREDICT", "2048")),
     },
 }
@@ -157,6 +229,11 @@ for _env_key in (
 ):
     if os.getenv(_env_key):
         CONFIG[_env_key] = os.getenv(_env_key)
+
+# Firecrawl key is commonly supplied via env on deploy targets that lack a
+# config_local.py (Vast.ai, containers).
+if os.getenv("FIRECRAWL_API_KEY"):
+    CONFIG["firecrawl_api_key"] = os.getenv("FIRECRAWL_API_KEY")
 
 if os.getenv("AION_SERVICE_TOKEN"):
     CONFIG["service_token"] = os.getenv("AION_SERVICE_TOKEN")

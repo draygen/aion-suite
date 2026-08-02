@@ -308,9 +308,21 @@ def search_threads(
 _NAME_TOKENS_CACHE: Optional[set] = None
 # Never treat these as routing name hints — too generic, or the primary people
 # whose messages we always search anyway.
+#
+# The pronouns matter more than they look: thread_display names are harvested
+# into this vocabulary, and Messenger names group threads things like "Just You".
+# That put "just" and "you" in the name list, so an ordinary greeting — "Hi, are
+# you there?" — was classified as a contact lookup and answered with somebody
+# else's message threads. Any word here that is a common English word rather
+# than a name will misroute every turn containing it.
 _NAME_TOKEN_EXCLUDE = {
     "unknown", "facebook", "user", "others", "and", "the", "jenn", "jennifer",
     "brian", "wallace", "frotten",
+    # pronouns / determiners that show up in Messenger-generated thread names
+    "you", "your", "yours", "me", "my", "mine", "we", "our", "ours", "us",
+    "him", "his", "her", "hers", "them", "their", "theirs", "they", "she", "it",
+    # generic thread-name filler
+    "just", "chat", "group", "new", "all", "with", "for", "from", "you're",
 }
 
 
