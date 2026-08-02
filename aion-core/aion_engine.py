@@ -370,14 +370,18 @@ def build_messages(prior_turns: list[dict], user_text: str, *,
 _LEAD_LABEL = re.compile(
     r"^\s*(?:\*\*|__)?\s*(?:response|answer|reply|aion|assistant)\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*\n*",
     re.IGNORECASE)
+# A stray markdown horizontal rule the model sometimes opens with.
+_LEAD_RULE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*\n+")
 
 
 def clean_reply(text: str) -> str:
-    """Strip a leading 'Response:' / 'AION:' style label the model occasionally
-    emits. Belt-and-suspenders behind the persona's no-label instruction."""
+    """Strip a leading 'Response:' / 'AION:' label or a stray opening horizontal
+    rule. Belt-and-suspenders behind the persona's no-label instruction."""
     if not text:
         return text
-    return _LEAD_LABEL.sub("", text, count=1).lstrip()
+    text = _LEAD_RULE.sub("", text.lstrip(), count=1)
+    text = _LEAD_LABEL.sub("", text, count=1)
+    return text.lstrip()
 
 
 def chat(session_id: str, user_text: str, *, store: Store | None = None,
