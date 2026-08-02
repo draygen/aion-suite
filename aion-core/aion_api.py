@@ -147,6 +147,15 @@ def action(body: ActionIn):
     if execution:
         return {"handled": True, "kind": "diagnostic", "reply": execution.output,
                 "requires_confirmation": False}
+
+    # Not a fast local diagnostic — is it a "do something on my machine" request?
+    # If so, the Hermes worker actually performs it (runs after the safe-local
+    # subset, so ping/nmap keep their fast path). Falls through to chat otherwise.
+    delegated = engine.maybe_delegate_action(body.message)
+    if delegated is not None:
+        return {"handled": True, "kind": "delegated", "reply": delegated,
+                "requires_confirmation": False}
+
     return {"handled": False, "kind": None, "reply": None, "requires_confirmation": False}
 
 

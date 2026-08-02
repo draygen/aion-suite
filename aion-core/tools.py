@@ -322,6 +322,71 @@ def _hermes_url(path: str) -> str:
     return f"{base}{path}"
 
 
+# ── Natural-language "do something on my machine" detection ──────────────────
+#
+# Brian shouldn't have to type "delegate:". If he asks AION to actually DO
+# something on his computer, that goes to the Hermes worker; if he asks a
+# question, AION answers it. The split is: an action VERB aimed at a SYSTEM
+# target, and NOT phrased as a how-to / explain question.
+
+_ACTION_VERB = (
+    r"check|show|list|find|get|display|run|execute|exec|launch|start|stop|restart|"
+    r"kill|install|uninstall|update|upgrade|clean|clear|delete|remove|wipe|create|"
+    r"make|mkdir|move|copy|rename|open|scan|monitor|configure|build|fix|mount|"
+    r"unmount|free\s*up|set\s*up|look\s+at|pull\s+up"
+)
+_SYSTEM_TARGET = (
+    r"disk|space|storage|drive|[a-z]:\\?|memory|ram|swap|cpu|load\s*average|"
+    r"process(?:es)?|port|ports|service|services|daemon|file|files|folder|folders|"
+    r"director(?:y|ies)|\bdir\b|path|network|interface|\bip\b|temp|cache|logs?|"
+    r"package|uptime|kernel|mount|"
+    r"my\s+(?:computer|machine|system|box|pc|laptop|desktop|drive|files)|"
+    r"this\s+(?:machine|computer|box|pc|system)"
+)
+# Conceptual questions AION should answer itself — never delegate these.
+_HOWTO_EXCLUDE = re.compile(
+    r"(?i)^\s*(?:how\s+(?:do|to|can|would|should|does)|what\s+is|what's\s+a\b|"
+    r"what\s+are|what's\s+the\s+(?:difference|command|best)|explain|why\b|describe|"
+    r"tell\s+me\s+about|what\s+does|difference\s+between|when\s+should|should\s+i\b|"
+    r"is\s+it\s+(?:safe|ok|possible)|can\s+you\s+explain)\b"
+)
+# Question forms that ARE a machine action ("what's using port 80", "how much
+# space is left") — asking AION to go find out, not to explain a concept.
+_INTERROGATIVE_ACTION = re.compile(
+    r"(?i)(?:what'?s?\s+(?:using|running\s+on|eating|hogging|taking\s+up|listening\s+on)"
+    r"|how\s+much\s+(?:disk\s+)?(?:space|ram|memory|storage)\b"
+    r"|is\s+\S+\s+running\b)"
+)
+
+
+def looks_like_machine_action(text: str) -> bool:
+    """Heuristic: is Brian asking AION to perform a local action (→ Hermes),
+    rather than asking a question (→ AION answers)? Verb + system target, minus
+    how-to/explain phrasing."""
+    t = (text or "").strip()
+    if not t or _HOWTO_EXCLUDE.search(t):
+        return False
+    low = t.lower()
+    has_target = re.search(rf"(?i)(?:{_SYSTEM_TARGET})", low) is not None
+    if not has_target:
+        return False
+    has_verb = re.search(rf"(?i)\b(?:{_ACTION_VERB})\b", low) is not None
+    return has_verb or _INTERROGATIVE_ACTION.search(low) is not None
+
+
+def build_hermes_objective(request: str) -> str:
+    """Wrap Brian's request as a directive objective for the worker. Directive
+    phrasing measurably improves the 8B worker's tool-call reliability
+    (AION-INTEGRATION.md guidance #2), and the C:\\ → /mnt/c note keeps it from
+    fumbling Windows paths inside its Linux sandbox."""
+    return (
+        "Use your terminal tools to ACTUALLY run the command(s) needed and report the "
+        "real output. Do not guess or fabricate results. Note: Windows paths like C:\\ "
+        "are mounted under /mnt/c in this Linux environment (C:\\ = /mnt/c, D:\\ = /mnt/d). "
+        f"Task: {request.strip()}"
+    )
+
+
 def hermes_available() -> bool:
     """True if delegation is enabled and the adapter answers /health."""
     if not CONFIG.get("hermes_enabled", True):

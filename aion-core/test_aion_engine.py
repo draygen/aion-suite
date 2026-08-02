@@ -216,6 +216,41 @@ class TestPersona(unittest.TestCase):
         self.assertTrue(engine.CONFIG.get("persona_as_system_message"))
 
 
+class TestActionDelegation(unittest.TestCase):
+    """chat() short-circuits a machine-action request to Hermes before the LLM,
+    and stays out of the way for ordinary chat."""
+
+    def _store(self):
+        s = MagicMock()
+        s.thread_history.return_value = []
+        return s
+
+    def test_action_delegates_and_skips_llm(self):
+        store = self._store()
+        with patch.object(engine, "maybe_delegate_action", return_value="DISK: 87% used"), \
+             patch.object(engine, "ask_llm_chat", side_effect=AssertionError("LLM must not run")):
+            reply = engine.chat("s1", "check my disk space", store=store)
+        self.assertEqual(reply, "DISK: 87% used")
+        store.save_turn.assert_called_once_with("s1", "check my disk space", "DISK: 87% used")
+
+    def test_non_action_goes_to_llm(self):
+        store = self._store()
+        with patch.object(engine, "maybe_delegate_action", return_value=None), \
+             patch.object(engine, "ask_llm_chat", return_value="hey"):
+            reply = engine.chat("s1", "hi", store=store)
+        self.assertEqual(reply, "hey")
+
+    def test_delegation_disabled_returns_none(self):
+        with patch.dict(engine.CONFIG, {"hermes_enabled": False}):
+            self.assertIsNone(engine.maybe_delegate_action("check my disk space"))
+
+    def test_hermes_down_falls_back_to_chat(self):
+        with patch.dict(engine.CONFIG, {"hermes_enabled": True}), \
+             patch("tools.looks_like_machine_action", return_value=True), \
+             patch("tools.hermes_available", return_value=False):
+            self.assertIsNone(engine.maybe_delegate_action("check my disk space"))
+
+
 class TestCleanReply(unittest.TestCase):
     def test_strips_plain_and_bold_labels(self):
         self.assertEqual(engine.clean_reply("Response: hey"), "hey")

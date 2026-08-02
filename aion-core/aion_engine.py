@@ -384,10 +384,42 @@ def clean_reply(text: str) -> str:
     return text.lstrip()
 
 
+def maybe_delegate_action(user_text: str) -> str | None:
+    """If Brian is asking AION to *do* something on his machine (not asking a
+    question), hand it to the Hermes worker and return the worker's output.
+    Returns None to let normal chat handle the turn — including when Hermes is
+    down, so AION can still answer/explain rather than error.
+
+    tools is imported lazily: it pulls in the whole tool registry, which the
+    engine's chat path doesn't otherwise need.
+    """
+    if not CONFIG.get("hermes_enabled", True):
+        return None
+    try:
+        import tools
+    except Exception:
+        return None
+    if not tools.looks_like_machine_action(user_text) or not tools.hermes_available():
+        return None
+    try:
+        return tools.run_hermes_delegate(tools.build_hermes_objective(user_text))
+    except Exception as exc:
+        logger.warning("hermes delegation failed: %s", exc)
+        return None
+
+
 def chat(session_id: str, user_text: str, *, store: Store | None = None,
          include_continuity: bool = False) -> str:
-    """Full non-streaming turn: load thread history → build → ask → persist."""
+    """Full non-streaming turn: load thread history → build → ask → persist.
+
+    A "do it on my machine" request short-circuits to the Hermes worker before
+    the LLM ever sees it, so AION performs the action instead of explaining it.
+    """
     store = store or Store()
+    delegated = maybe_delegate_action(user_text)
+    if delegated is not None:
+        store.save_turn(session_id, user_text, delegated)
+        return delegated
     prior = store.thread_history(session_id)
     last_seen = gap = None
     if include_continuity:

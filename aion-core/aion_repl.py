@@ -148,6 +148,17 @@ def main() -> int:
             first_turn = False
             continue
 
+        # "Do it on my machine" requests go to the Hermes worker instead of the
+        # LLM, so AION performs the action rather than explaining it.
+        delegated = engine.maybe_delegate_action(user_input)
+        if delegated is not None:
+            print(f"AION: {delegated}\n")
+            conversation.append({"role": "user", "content": user_input})
+            conversation.append({"role": "assistant", "content": delegated})
+            store.save_turn(session_id, user_input, delegated)
+            first_turn = False
+            continue
+
         # Send an augmented copy with continuity/facts folded into the user
         # message, but keep the raw turn in history and in the rolling context.
         window = engine.build_messages(

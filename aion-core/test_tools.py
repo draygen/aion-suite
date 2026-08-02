@@ -6,11 +6,13 @@ import tools
 from tools import (
     ToolRuntimeError,
     available_tool_status,
+    build_hermes_objective,
     dispatch_safe_diagnostic_message,
     dispatch_tool_message,
     get_tool_registry,
     handle_ops_command,
     is_authorized_target,
+    looks_like_machine_action,
     run_hermes_delegate,
 )
 
@@ -219,6 +221,47 @@ class TestHermesDelegation(unittest.TestCase):
             out = run_hermes_delegate("break it", timeout=30)
         self.assertIn("failed", out)
         self.assertIn("model exploded", out)
+
+
+class TestMachineActionDetection(unittest.TestCase):
+    """The natural trigger: 'do something on my machine' -> Hermes; questions
+    and chat -> AION answers. Verb + system target, minus how-to/explain."""
+
+    ACTIONS = [
+        "hey check my disk space on windows C:\\",
+        "check my disk space",
+        "show me whats running on port 80",
+        "list the files in my downloads folder",
+        "how much ram is free",
+        "what's using port 443",
+        "kill the process on port 3000",
+        "clean up temp files",
+        "show me my running processes",
+    ]
+    NON_ACTIONS = [
+        "how do i check disk space on linux",
+        "what is a reverse shell",
+        "explain how ports work",
+        "hi",
+        "tell me a joke about sysadmins",
+        "whats the difference between tcp and udp",
+        "vim or emacs?",
+        "what's the best way to learn rust",
+    ]
+
+    def test_action_requests_are_detected(self):
+        for m in self.ACTIONS:
+            self.assertTrue(looks_like_machine_action(m), f"missed action: {m!r}")
+
+    def test_questions_and_chat_are_not_actions(self):
+        for m in self.NON_ACTIONS:
+            self.assertFalse(looks_like_machine_action(m), f"false positive: {m!r}")
+
+    def test_objective_is_directive_and_maps_windows_paths(self):
+        obj = build_hermes_objective("check my disk space on C:\\")
+        self.assertIn("ACTUALLY run", obj)
+        self.assertIn("/mnt/c", obj)
+        self.assertIn("check my disk space", obj)
 
 
 class _FakeResp:
