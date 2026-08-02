@@ -1,0 +1,183 @@
+import unittest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+
+import aion_engine as engine
+
+
+class TestTimeHelpers(unittest.TestCase):
+    def test_humanize_gap_scales_units(self):
+        self.assertEqual(engine.humanize_gap(45), "45s")
+        self.assertEqual(engine.humanize_gap(600), "10m")
+        self.assertEqual(engine.humanize_gap(3600), "1h")
+        self.assertEqual(engine.humanize_gap(3900), "1h 5m")
+        self.assertEqual(engine.humanize_gap(90000), "1d 1h")
+
+    def test_humanize_gap_clamps_negative(self):
+        self.assertEqual(engine.humanize_gap(-30), "0s")
+
+    def test_parse_ts_normalizes_to_utc(self):
+        naive = engine.parse_ts("2026-07-26T12:00:00")
+        self.assertEqual(naive.tzinfo, timezone.utc)
+        self.assertIsNone(engine.parse_ts("not a timestamp"))
+        self.assertIsNone(engine.parse_ts(None))
+
+
+class TestBuildMessages(unittest.TestCase):
+    """The model rejects system-role messages, so every message built here must
+    be user/assistant only, ending on the augmented user turn."""
+
+    def setUp(self):
+        patcher = patch.object(engine, "get_facts", return_value=[])
+        self.addCleanup(patcher.stop)
+        patcher.start()
+        mem = patch.object(engine, "_MEMORY_AVAILABLE", False)
+        self.addCleanup(mem.stop)
+        mem.start()
+        gpt = patch.object(engine, "chatgpt_store", None)
+        self.addCleanup(gpt.stop)
+        gpt.start()
+
+    def test_appends_user_turn_and_emits_no_system_role(self):
+        prior = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey"}]
+        msgs = engine.build_messages(prior, "what's up")
+        self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user"])
+        self.assertNotIn("system", [m["role"] for m in msgs])
+        self.assertEqual(msgs[-1]["content"], "what's up")
+
+    def test_drops_leading_assistant_turns(self):
+        prior = [{"role": "assistant", "content": "orphan"}, {"role": "user", "content": "hi"}]
+        msgs = engine.build_messages(prior, "next")
+        self.assertEqual(msgs[0]["role"], "user")
+
+    def test_windows_to_context_limit(self):
+        prior = [{"role": "user" if i % 2 == 0 else "assistant", "content": str(i)}
+                 for i in range(100)]
+        msgs = engine.build_messages(prior, "latest")
+        self.assertLessEqual(len(msgs), engine.CONTEXT_WINDOW)
+        self.assertEqual(msgs[-1]["content"], "latest")
+
+    def test_skips_malformed_prior_turns(self):
+        prior = [{"role": "user", "content": "keep"},
+                 {"role": "system", "content": "drop"},
+                 {"role": "assistant", "content": ""}]
+        msgs = engine.build_messages(prior, "now")
+        self.assertEqual([m["content"] for m in msgs], ["keep", "now"])
+
+    def test_does_not_mutate_caller_history(self):
+        prior = [{"role": "user", "content": "hi"}]
+        engine.build_messages(prior, "second")
+        self.assertEqual(prior, [{"role": "user", "content": "hi"}])
+
+    def test_augmented_overrides_final_turn(self):
+        msgs = engine.build_messages([], "/msg jenn", augmented="ARCHIVE CONTEXT")
+        self.assertEqual(msgs[-1]["content"], "ARCHIVE CONTEXT")
+
+    def test_continuity_is_folded_into_user_turn(self):
+        now = engine.utc_now()
+        msgs = engine.build_messages([], "hello", include_continuity=True,
+                                     last_seen=now - timedelta(hours=2), gap_seconds=7200)
+        content = msgs[-1]["content"]
+        self.assertEqual(msgs[-1]["role"], "user")
+        self.assertIn("2h", content)
+        self.assertIn("Brian: hello", content)
+
+    def test_no_context_leaves_turn_untouched(self):
+        msgs = engine.build_messages([], "plain question")
+        self.assertEqual(msgs[-1]["content"], "plain question")
+
+
+class TestFactsBlock(unittest.TestCase):
+    def test_retrieval_failure_degrades_to_empty(self):
+        with patch.object(engine, "get_facts", side_effect=RuntimeError("brain down")), \
+             patch.object(engine, "_MEMORY_AVAILABLE", False), \
+             patch.object(engine, "chatgpt_store", None):
+            self.assertEqual(engine.facts_block("anything"), "")
+
+    def test_facts_are_labelled_for_the_model(self):
+        with patch.object(engine, "get_facts", return_value=["Brian has a 5070"]), \
+             patch.object(engine, "_MEMORY_AVAILABLE", False), \
+             patch.object(engine, "chatgpt_store", None):
+            self.assertIn("Relevant facts:", engine.facts_block("gpu"))
+
+
+class TestSessionLastSeen(unittest.TestCase):
+    """Continuity must be measured across threads — a new thread has no history
+    of its own, which is exactly when the gap matters."""
+
+    def test_prefers_explicit_departure_event(self):
+        departed = engine.utc_now() - timedelta(hours=3)
+        store = MagicMock()
+        store.last_departure.return_value = departed
+        last_seen, gap = engine.session_last_seen(store)
+        self.assertEqual(last_seen, departed)
+        self.assertAlmostEqual(gap, 10800, delta=5)
+        store.recent_turns.assert_not_called()
+
+    def test_falls_back_to_last_turn(self):
+        ts = (engine.utc_now() - timedelta(minutes=30)).isoformat()
+        store = MagicMock()
+        store.last_departure.return_value = None
+        store.recent_turns.return_value = [{"role": "user", "content": "x", "ts": ts}]
+        last_seen, gap = engine.session_last_seen(store)
+        self.assertIsNotNone(last_seen)
+        self.assertAlmostEqual(gap, 1800, delta=5)
+
+    def test_reuses_supplied_history_instead_of_querying(self):
+        ts = (engine.utc_now() - timedelta(minutes=5)).isoformat()
+        store = MagicMock()
+        store.last_departure.return_value = None
+        engine.session_last_seen(store, prior=[{"role": "user", "content": "x", "ts": ts}])
+        store.recent_turns.assert_not_called()
+
+    def test_no_history_reports_nothing(self):
+        store = MagicMock()
+        store.last_departure.return_value = None
+        store.recent_turns.return_value = []
+        self.assertEqual(engine.session_last_seen(store), (None, None))
+
+    def test_first_conversation_wording(self):
+        block = engine.continuity_block(engine.utc_now(), None, None)
+        self.assertIn("No prior session on record", block)
+
+
+class TestMessageArchiveHelpers(unittest.TestCase):
+    def test_history_label_stays_short(self):
+        self.assertEqual(engine.msg_history_label("jenn birthday"), "/msg jenn birthday")
+
+    def test_context_turn_carries_threads_and_question(self):
+        turn = engine.msg_context_turn("birthday", ["THREAD A", "THREAD B"])
+        self.assertIn("THREAD A", turn)
+        self.assertIn("THREAD B", turn)
+        self.assertIn('about "birthday"', turn)
+
+    def test_search_returns_empty_without_archive(self):
+        with patch.object(engine, "messages_store", None):
+            self.assertEqual(engine.search_messages("anything"), [])
+            self.assertFalse(engine.messages_available())
+
+
+class TestStoreSourceScoping(unittest.TestCase):
+    """CLI and API share the Store; events must stay attributable to each."""
+
+    def _store(self, source):
+        store = engine.Store.__new__(engine.Store)
+        store.ok = True
+        store.user_id = 1
+        store.username = "brian"
+        store.source = source
+        store._log_event = MagicMock()
+        return store
+
+    def test_log_tags_its_own_source(self):
+        store = self._store("api")
+        store.log("session_start", "app:abc", "arrived")
+        self.assertEqual(store._log_event.call_args.kwargs["source"], "api")
+
+    def test_default_source_is_cli(self):
+        store = engine.Store.__new__(engine.Store)
+        self.assertEqual(engine.Store.__init__.__defaults__, ("cli",))
+
+
+if __name__ == "__main__":
+    unittest.main()

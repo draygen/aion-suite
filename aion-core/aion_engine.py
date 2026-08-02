@@ -107,12 +107,18 @@ def new_thread_id(prefix: str = "cli") -> str:
 
 class Store:
     """History/events access. Every method is defensive; `.ok` is False if the
-    DB never came up, in which case the engine runs statelessly."""
+    DB never came up, in which case the engine runs statelessly.
 
-    def __init__(self):
+    `source` tags the events this store writes ("cli", "api", …) and scopes
+    `last_departure()` to the same front-end, so the terminal REPL reports when
+    Brian last left the *terminal* rather than when he closed the desktop app.
+    """
+
+    def __init__(self, source: str = "cli"):
         self.ok = False
         self.user_id: int | None = None
         self.username = str(CONFIG.get("primary_user", "brian"))
+        self.source = source
         self._log_event = None
         try:
             import auth
@@ -199,9 +205,9 @@ class Store:
     def _thread_title(self, db, session_id: str) -> str:
         try:
             row = db.execute(
-                "SELECT content FROM history WHERE session_id = ? AND role = 'user' "
-                "ORDER BY id ASC LIMIT 1",
-                (session_id,),
+                "SELECT content FROM history WHERE user_id = ? AND session_id = ? "
+                "AND role = 'user' ORDER BY id ASC LIMIT 1",
+                (self.user_id, session_id),
             ).fetchone()
             if row and row["content"]:
                 t = " ".join(str(row["content"]).split())
@@ -217,11 +223,12 @@ class Store:
         try:
             row = db.execute(
                 "SELECT ts FROM events WHERE user_id = ? AND event_type = 'session_end' "
-                "ORDER BY id DESC LIMIT 1",
-                (self.user_id,),
+                "AND source = ? ORDER BY id DESC LIMIT 1",
+                (self.user_id, self.source),
             ).fetchone()
             return parse_ts(row["ts"]) if row else None
-        except Exception:
+        except Exception as exc:
+            logger.warning("events read failed: %s", exc)
             return None
         finally:
             db.close()
@@ -251,7 +258,7 @@ class Store:
         if not self.ok or self._log_event is None:
             return
         try:
-            self._log_event(event_type=event_type, source="cli", user_id=self.user_id,
+            self._log_event(event_type=event_type, source=self.source, user_id=self.user_id,
                             session_id=session_id, content=content, payload=payload)
         except Exception as exc:
             logger.warning("event log failed (%s): %s", event_type, exc)
@@ -259,11 +266,29 @@ class Store:
 
 # ── retrieval + context augmentation ────────────────────────────────────────────
 
+def session_last_seen(store: "Store", prior: list[dict] | None = None):
+    """When Brian was last active *anywhere*, and how long ago, as
+    (last_seen, gap_seconds).
+
+    Prefers an explicit departure event, else the timestamp of his last turn.
+    This deliberately looks across threads: a brand-new thread has no history of
+    its own, so scoping to it would always report "no prior session" on exactly
+    the turn where continuity matters. Pass `prior` (newest turn last) to reuse
+    history the caller has already loaded instead of re-querying.
+    """
+    last_seen = store.last_departure()
+    if last_seen is None:
+        turns = prior if prior is not None else store.recent_turns(1)
+        last_seen = parse_ts(turns[-1]["ts"]) if turns else None
+    gap = (utc_now() - last_seen).total_seconds() if last_seen else None
+    return last_seen, gap
+
+
 def continuity_block(now: datetime, last_seen: datetime | None, gap_seconds: float | None) -> str:
     lines = [f"Current time is {fmt_local(now)}."]
     if last_seen is not None and gap_seconds is not None:
         lines.append(f"Brian was last active {humanize_gap(gap_seconds)} ago "
-                     f"(at {fmt_local(last_seen)}); he has just returned.")
+                     f"(at {fmt_local(last_seen)}); he has just returned this session.")
     else:
         lines.append("No prior session on record — this looks like a first conversation.")
     return "\n".join(f"- {l}" for l in lines)
@@ -312,9 +337,15 @@ def augment_user_turn(user_text: str, now: datetime, last_seen, gap_seconds,
 
 
 def build_messages(prior_turns: list[dict], user_text: str, *,
-                   include_continuity: bool = False, last_seen=None, gap_seconds=None) -> list[dict]:
+                   include_continuity: bool = False, last_seen=None, gap_seconds=None,
+                   augmented: str | None = None) -> list[dict]:
     """Assemble the messages list to send to the model: bounded prior turns
-    (user/assistant only, no leading assistant) + the augmented current turn."""
+    (user/assistant only, no leading assistant) + the augmented current turn.
+
+    `prior_turns` must NOT already contain `user_text` — it is appended here.
+    `augmented` overrides the default context-folding for the final turn (used
+    by /msg, which folds message-archive threads in instead of facts).
+    """
     convo = [{"role": t["role"], "content": t["content"]}
              for t in prior_turns
              if t.get("role") in ("user", "assistant") and t.get("content")]
@@ -322,7 +353,7 @@ def build_messages(prior_turns: list[dict], user_text: str, *,
     window = [dict(m) for m in convo[-CONTEXT_WINDOW:]]
     while window and window[0]["role"] == "assistant":
         window.pop(0)
-    window[-1]["content"] = augment_user_turn(
+    window[-1]["content"] = augmented if augmented is not None else augment_user_turn(
         user_text, utc_now(), last_seen, gap_seconds, include_continuity)
     return window
 
@@ -333,9 +364,8 @@ def chat(session_id: str, user_text: str, *, store: Store | None = None,
     store = store or Store()
     prior = store.thread_history(session_id)
     last_seen = gap = None
-    if include_continuity and prior:
-        last_seen = parse_ts(prior[-1]["ts"])
-        gap = (utc_now() - last_seen).total_seconds() if last_seen else None
+    if include_continuity:
+        last_seen, gap = session_last_seen(store)
     messages = build_messages(prior, user_text, include_continuity=include_continuity,
                               last_seen=last_seen, gap_seconds=gap)
     reply = (ask_llm_chat(messages) or "").strip() or "(no response)"
@@ -343,9 +373,28 @@ def chat(session_id: str, user_text: str, *, store: Store | None = None,
     return reply
 
 
+def messages_available() -> bool:
+    """True if the Jenn/FB message archive (messages.db) is present here."""
+    return messages_store is not None and messages_store.db_exists()
+
+
 def search_messages(query: str, max_threads: int = 4, max_per_thread: int = 8) -> list[str]:
     """Jenn/FB message-archive search (messages.db). Returns formatted blocks."""
-    if messages_store is None or not messages_store.db_exists():
+    if not messages_available():
         return []
     return messages_store.search_threads(query=query, max_threads=max_threads,
-                                        max_per_thread=max_per_thread)
+                                         max_per_thread=max_per_thread)
+
+
+def msg_context_turn(query: str, blocks: list[str]) -> str:
+    """Fold matched archive threads into a user turn (no system role)."""
+    ctx = "\n\n".join(blocks)
+    return ("(Message-archive threads matching the search — these are real logged "
+            f"messages; use them to answer:\n{ctx}\n)\n\n"
+            f"Brian: Walk me through these messages about \"{query}\".")
+
+
+def msg_history_label(query: str) -> str:
+    """What gets written to history for a /msg turn — the command, not the
+    thousands of characters of archive context we sent the model."""
+    return f"/msg {query}"

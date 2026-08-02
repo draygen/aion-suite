@@ -1,3 +1,5 @@
+import json
+
 import requests
 
 from aion_logging import get_logger
@@ -78,14 +80,11 @@ def ask_llm(prompt: str) -> str:
     return ask_llm_chat([{"role": "user", "content": prompt}])
 
 
-def _ollama_chat(messages: list) -> str:
-    model = CONFIG.get('model', 'brian-mistral')
-    attempted = []
-    last_error = None
+def _ollama_payload(messages: list, *, stream: bool) -> dict:
     payload = {
-        "model": model,
+        "model": CONFIG.get('model', 'brian-mistral'),
         "messages": messages,
-        "stream": False,
+        "stream": stream,
         # Keep the model resident so idle gaps don't trigger a multi-second
         # reload on the next request (the biggest latency outlier).
         "keep_alive": CONFIG.get("llm_keep_alive", "30m"),
@@ -99,6 +98,54 @@ def _ollama_chat(messages: list) -> str:
         # App-level options override the Modelfile so response length and
         # context window can be tuned without rebuilding the model.
         payload["options"] = options
+    return payload
+
+
+def stream_llm_chat(messages: list):
+    """Yield content tokens from Ollama as they arrive.
+
+    Same endpoint selection and payload as `_ollama_chat`, but streaming. There
+    is no OpenAI fallback: by the time the first token is on the wire the
+    response has already started, so a mid-stream swap would produce a spliced
+    answer. Callers should surface the error instead.
+    """
+    payload = _ollama_payload(messages, stream=True)
+    model = payload["model"]
+    attempted = []
+    last_error = None
+    for base_url in ollama_base_urls():
+        attempted.append(base_url)
+        try:
+            with requests.post(f"{base_url}/api/chat", json=payload,
+                               stream=True, timeout=300) as resp:
+                if resp.status_code >= 400:
+                    raise OllamaResponseError(base_url, resp.status_code, model,
+                                              resp.text.strip())
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    token = (data.get("message") or {}).get("content", "")
+                    if token:
+                        yield token
+                    if data.get("done"):
+                        return
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            last_error = exc
+            continue
+
+    attempted_text = ", ".join(attempted) if attempted else ollama_display_target()
+    raise RuntimeError(
+        f"Ollama not reachable for model {model}. Tried: {attempted_text}. Last error: {last_error}"
+    )
+
+
+def _ollama_chat(messages: list) -> str:
+    payload = _ollama_payload(messages, stream=False)
+    model = payload["model"]
+    attempted = []
+    last_error = None
 
     for base_url in ollama_base_urls():
         attempted.append(base_url)

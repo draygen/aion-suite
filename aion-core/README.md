@@ -84,6 +84,29 @@ Aion supports several commands:
 *   `/set k=v`: Set a runtime option (e.g., `/set model=gpt-4o-mini`).
 *   `exit` or `quit`: Exit the application.
 
+### Session-aware CLI and local API
+
+`app.py` is stateless single-turn. For continuity (persisted threads, "you were
+last here 3 days ago", ChatGPT-archive auto-recall) use the REPL or the local
+HTTP API — both drive the same `aion_engine`, so they behave identically:
+
+```bash
+./.venv/bin/python aion_repl.py                                   # terminal
+./.venv/bin/uvicorn aion_api:app --host 127.0.0.1 --port 8770     # HTTP API
+```
+
+The API is localhost-only and unauthenticated by design (personal, single-user
+— do not bind it to `0.0.0.0`):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/health` | model, memory and message-archive status |
+| `GET /api/threads` | thread list, newest first |
+| `GET /api/threads/{id}` | full history for one thread |
+| `POST /api/chat` | one turn; omit `thread_id` to start a new thread |
+| `POST /api/chat/stream` | same, as SSE (`meta` → `token`… → `done`) |
+| `POST /api/msg` | search the Jenn/FB archive and have AION walk the threads |
+
 ### Google Calendar Appointments
 
 AION can create appointments on Brian's primary Google Calendar, which then syncs
